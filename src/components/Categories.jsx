@@ -8,6 +8,7 @@ import { fmtC, todayISO } from "../formatters";
 import { exportCSV } from "../exportCSV";
 import Assets from "./Assets";
 import Investment from "./Investment";
+import InstallApp from "./InstallApp";
 
 export default function Categories({ user, categories, transactions, assets, settings, onSettings, reload, onLogout, goGraphs }) {
   const [editCat, setEditCat] = useState(null); // {type} for new, category for edit
@@ -121,6 +122,8 @@ export default function Categories({ user, categories, transactions, assets, set
           </div>
         </div>
       </div>
+
+      <InstallApp />
 
       {editCat && <CatForm cat={editCat} onClose={() => setEditCat(null)} onDone={() => { setEditCat(null); reload(); }} />}
       {pwOpen && <PasswordForm onClose={() => setPwOpen(false)} />}

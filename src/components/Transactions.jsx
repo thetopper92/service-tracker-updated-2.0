@@ -77,7 +77,7 @@ export default function Transactions({ transactions, categories, settings, onEdi
                 <li key={t.id} className="tx-row">
                   <span className="dot" style={{ background: colorOf(t) }} />
                   <div className="tx-main" onClick={() => onEdit(t)}>
-                    <b>{t.category}</b>
+                    <b>{t.category}{t.pending && <span className="pill pending">Not synced</span>}</b>
                     {t.description && <span className="muted small">{t.description}</span>}
                   </div>
                   <span className={`amt ${t.type}`}>{t.type === "income" ? "+" : "-"}{fmtC(t.amount, settings)}</span>
