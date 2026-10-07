@@ -29,6 +29,7 @@ export default defineConfig({
         navigateFallbackDenylist: [/^\/api\//],
         globPatterns: ["**/*.{js,css,html,png,svg,ico,webmanifest}"],
         cleanupOutdatedCaches: true,
+        importScripts: ["push-sw.js"],
         maximumFileSizeToCacheInBytes: 4 * 1024 * 1024,
         runtimeCaching: [
           {
