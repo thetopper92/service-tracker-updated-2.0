@@ -139,13 +139,13 @@ textarea.input { resize: vertical; }
 .tabbar button { flex: 1; border: 0; background: none; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; color: var(--muted); font-size: .72rem; font-weight: 600; }
 .tabbar button.on { color: var(--blue); }
 
-.fab-wrap { position: fixed; left: 16px; bottom: calc(var(--tabbar-h) + 16px + env(safe-area-inset-bottom)); z-index: 40; }
+.fab-wrap { position: fixed; right: 16px; bottom: calc(var(--tabbar-h) + 16px + env(safe-area-inset-bottom)); z-index: 40; }
 .fab {
   width: 58px; height: 58px; border-radius: 20px; border: 0; background: var(--blue); color: #fff;
   display: grid; place-items: center; box-shadow: 0 12px 28px rgba(79, 142, 247, .45); transition: transform .2s, background .2s;
 }
 .fab.open { transform: rotate(45deg); background: var(--text); color: var(--bg); }
-.fab-menu { position: absolute; bottom: 70px; left: 0; display: flex; flex-direction: column; gap: 10px; animation: rise .15s ease-out; }
+.fab-menu { position: absolute; bottom: 70px; right: 0; align-items: flex-end; display: flex; flex-direction: column; gap: 10px; animation: rise .15s ease-out; }
 .fab-item { display: flex; align-items: center; gap: 8px; border: 0; color: #fff; padding: 12px 18px; border-radius: 14px; font-weight: 700; white-space: nowrap; box-shadow: var(--shadow); }
 .fab-item.income { background: var(--green); }
 .fab-item.expense { background: var(--red); }
@@ -257,7 +257,43 @@ textarea.input { resize: vertical; }
   .side-link.on { background: var(--blue); color: #fff; }
   .side-foot { display: flex; flex-direction: column; gap: 4px; border-top: 1px solid var(--border); padding-top: 12px; }
   .main { margin-left: 250px; padding: 28px 32px 120px; }
-  .fab-wrap { left: 274px; bottom: 28px; }
+  .fab-wrap { right: 32px; bottom: 28px; }
   h2 { font-size: 1.9rem; }
   .stat-value { font-size: 1.5rem; }
 }
+
+/* ---------- Equipment, investment, payback ---------- */
+.kv-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 14px; }
+.kv { background: var(--soft); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.kv b { font-size: 1.05rem; font-weight: 800; overflow-wrap: anywhere; }
+.chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+.chip { border: 1px solid var(--border); background: var(--card); border-radius: 99px; padding: 6px 12px; font-size: .85rem; font-weight: 600; color: var(--muted); }
+.chip.on { background: var(--blue); border-color: var(--blue); color: #fff; }
+.asset-list { list-style: none; margin: 0; padding: 0; }
+.asset-list li { display: grid; grid-template-columns: 1fr auto; gap: 6px 12px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.asset-list li:last-child { border-bottom: 0; }
+.asset-list li.dim .asset-main b, .asset-list li.dim .asset-value b { opacity: .65; }
+.asset-main { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.asset-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.asset-value { text-align: right; display: flex; flex-direction: column; }
+.asset-actions { grid-column: 1 / -1; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.btn.sell { background: var(--green); color: #fff; }
+.pill.active { background: rgba(79, 142, 247, .14); color: var(--blue); }
+.pill.sold { background: rgba(34, 180, 108, .14); color: var(--green); }
+.pill.written_off { background: rgba(100, 116, 139, .18); color: var(--muted); }
+.invest-form { display: grid; grid-template-columns: 1fr; gap: 12px; align-items: end; }
+.field.check.inline { padding-top: 12px; font-weight: 500; font-size: .92rem; }
+.invest-note { margin-top: 12px; }
+.progress { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.progress-bar { height: 10px; background: var(--soft); border-radius: 99px; overflow: hidden; }
+.progress-bar div { height: 100%; background: linear-gradient(90deg, #34C97B, #4F8EF7); border-radius: 99px; transition: width .4s; }
+@media (min-width: 640px) {
+  .kv-grid { grid-template-columns: repeat(3, 1fr); }
+  .invest-form { grid-template-columns: 1fr 1fr auto; }
+  .asset-list li { grid-template-columns: 1fr auto auto; align-items: center; }
+  .asset-actions { grid-column: auto; justify-content: flex-end; }
+}
+@media (min-width: 900px) {
+  .panel > .kv-grid:has(> :nth-child(4):last-child) { grid-template-columns: repeat(4, 1fr); }
+}
+.invest-note .link { margin-left: 6px; }

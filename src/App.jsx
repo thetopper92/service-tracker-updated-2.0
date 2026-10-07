@@ -21,6 +21,7 @@ export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [transactions, setTransactions] = useState([]);
   const [categories, setCategories] = useState([]);
+  const [assets, setAssets] = useState([]);
   const [txModal, setTxModal] = useState(null); // { tx?, type? }
   const [fabOpen, setFabOpen] = useState(false);
   const [error, setError] = useState("");
@@ -33,9 +34,10 @@ export default function App() {
 
   const loadData = useCallback(async () => {
     try {
-      const [tx, cats] = await Promise.all([api.get("/api/transactions"), api.get("/api/categories")]);
+      const [tx, cats, as] = await Promise.all([api.get("/api/transactions"), api.get("/api/categories"), api.get("/api/assets")]);
       setTransactions(tx);
       setCategories(cats);
+      setAssets(as);
       setError("");
     } catch (e) {
       if (e.status === 401) setUser(null);
@@ -90,6 +92,7 @@ export default function App() {
     setUser(null);
     setTransactions([]);
     setCategories([]);
+    setAssets([]);
   };
 
   const reload = async (withUser) => {
@@ -114,7 +117,7 @@ export default function App() {
     );
   }
 
-  const common = { user, transactions, categories, settings, dark };
+  const common = { user, transactions, categories, assets, settings, dark };
   const openAdd = (type) => { setFabOpen(false); setTxModal({ type }); };
 
   return (
@@ -151,10 +154,10 @@ export default function App() {
         {tab === "graphs" && <Graphs {...common} />}
         {tab === "growth" && <Growth {...common} />}
         {tab === "transactions" && <Transactions {...common} onEdit={(tx) => setTxModal({ tx })} onDelete={deleteTx} />}
-        {tab === "categories" && <Categories {...common} onSettings={saveSettings} reload={reload} onLogout={logout} />}
+        {tab === "categories" && <Categories {...common} onSettings={saveSettings} reload={reload} onLogout={logout} goGraphs={() => { setTab("graphs"); window.scrollTo(0, 0); }} />}
       </main>
 
-      {/* Floating add button (left side) */}
+      {/* Floating add button (right side) */}
       {fabOpen && <div className="fab-backdrop" onClick={() => setFabOpen(false)} />}
       <div className="fab-wrap">
         {fabOpen && (
