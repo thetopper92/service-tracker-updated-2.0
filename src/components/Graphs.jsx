@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import YearPicker, { yearsOf, monthly } from "./YearPicker";
 import { Empty } from "./Dashboard";
+import Payback from "./Payback";
 import { MONTHS } from "../data";
 import { fmtC, fmtCS } from "../formatters";
 
-export default function Graphs({ transactions, categories, settings, dark }) {
+export default function Graphs({ transactions, categories, assets, settings, dark }) {
   const years = yearsOf(transactions);
   const [year, setYear] = useState(new Date().getFullYear());
   const data = useMemo(() => monthly(transactions, year).map((r) => ({ ...r, name: MONTHS[r.m] })), [transactions, year]);
@@ -34,6 +35,8 @@ export default function Graphs({ transactions, categories, settings, dark }) {
         <h2>Graphs</h2>
         <YearPicker year={year} setYear={setYear} years={years} />
       </div>
+
+      <Payback transactions={transactions} assets={assets} settings={settings} dark={dark} />
 
       <div className="panel">
         <div className="panel-head"><h3>Income vs expenses</h3></div>

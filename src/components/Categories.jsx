@@ -6,8 +6,10 @@ import { api } from "../api";
 import { COLORS, CURRENCIES, DATE_FORMATS, TABS, BACKUP_PREFIX } from "../data";
 import { fmtC, todayISO } from "../formatters";
 import { exportCSV } from "../exportCSV";
+import Assets from "./Assets";
+import Investment from "./Investment";
 
-export default function Categories({ user, categories, transactions, settings, onSettings, reload, onLogout }) {
+export default function Categories({ user, categories, transactions, assets, settings, onSettings, reload, onLogout, goGraphs }) {
   const [editCat, setEditCat] = useState(null); // {type} for new, category for edit
   const [pwOpen, setPwOpen] = useState(false);
   const fileRef = useRef(null);
@@ -73,6 +75,10 @@ export default function Categories({ user, categories, transactions, settings, o
           </div>
         ))}
       </div>
+
+      <Assets assets={assets} settings={settings} reload={reload} />
+
+      <Investment transactions={transactions} assets={assets} settings={settings} onSettings={onSettings} goGraphs={goGraphs} />
 
       <div className="panel">
         <div className="panel-head"><h3><Icon name="settings" size={18} /> Settings</h3></div>

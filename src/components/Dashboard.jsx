@@ -45,9 +45,9 @@ export default function Dashboard({ user, transactions, categories, settings, on
       </div>
 
       <div className="cards">
+        <Stat label="Net profit" value={fmtC(profit, settings)} icon="wallet" tone={profit >= 0 ? "blue" : "red"} />
         <Stat label="Revenue" value={fmtC(inc, settings)} icon="up" tone="green" />
         <Stat label="Expenses" value={fmtC(exp, settings)} icon="down" tone="red" />
-        <Stat label="Net profit" value={fmtC(profit, settings)} icon="wallet" tone={profit >= 0 ? "blue" : "red"} />
         <Stat label="Profit margin" value={`${margin.toFixed(1)}%`} sub={`ROI ${roi.toFixed(1)}%`} icon="trend" tone="amber" />
       </div>
 
