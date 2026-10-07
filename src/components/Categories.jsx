@@ -15,6 +15,7 @@ import { computePayback } from "../payback";
 import { oilStatus } from "../oil";
 import Security from "./Security";
 import DbImport from "./DbImport";
+import ImportHistory from "./ImportHistory";
 import { encryptBackup, decryptBackup, getLockConfig } from "../lock";
 import { buildDb } from "../dbfile";
 
@@ -26,6 +27,7 @@ export default function Categories({ user, categories, transactions, assets, oil
   const [dbFile, setDbFile] = useState(null);
   const [pwPrompt, setPwPrompt] = useState(null); // { mode: "encrypt" } | { mode: "decrypt", file }
   const [lockTick, setLockTick] = useState(0);
+  const [importTick, setImportTick] = useState(0);
   const [open, setOpen] = useState(() => {
     try { return JSON.parse(localStorage.getItem(SECTION_KEY) || "[]"); } catch { return []; }
   });
@@ -196,6 +198,7 @@ export default function Categories({ user, categories, transactions, assets, oil
             <input ref={fileRef} type="file" accept=".json,.stbak,.db,.sqlite,.sqlite3,.db3,application/json,application/octet-stream,application/x-sqlite3,application/vnd.sqlite3" hidden onChange={restore} />
           </div>
           <p className="muted small">Restore accepts Service Tracker backups (.json, .stbak, .db) and can import transactions from other apps' .db / .sqlite databases.</p>
+          <ImportHistory settings={settings} reload={reload} refreshKey={importTick} />
         </Section>
 
         <Section {...sec("account")} icon="key" title="Account" summary={user.email}>
@@ -220,7 +223,7 @@ export default function Categories({ user, categories, transactions, assets, oil
       {editCat && <CatForm cat={editCat} onClose={() => setEditCat(null)} onDone={() => { setEditCat(null); reload(); }} />}
       {pwOpen && <PasswordForm onClose={() => setPwOpen(false)} />}
       {dbFile && <DbImport file={dbFile} settings={settings} onClose={() => setDbFile(null)}
-        onDone={async (msg) => { setDbFile(null); await reload(true); alert(msg); }} />}
+        onDone={async (msg) => { setDbFile(null); await reload(true); setImportTick((n) => n + 1); alert(msg); }} />}
       {pwPrompt && (
         <BackupPassword mode={pwPrompt.mode} onClose={() => setPwPrompt(null)} onSubmit={async (password) => {
           if (pwPrompt.mode === "encrypt") { await encryptedBackup(password); setPwPrompt(null); return; }
