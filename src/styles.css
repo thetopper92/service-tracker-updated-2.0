@@ -227,7 +227,7 @@ textarea.input { resize: vertical; }
   position: relative; width: 100%; max-width: 520px; max-height: 92vh; overflow-y: auto;
   background: var(--card); border-radius: 24px 24px 0 0; box-shadow: 0 -10px 40px rgba(0, 0, 0, .25); animation: rise .18s ease-out;
 }
-.modal-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; background: var(--card); border-bottom: 1px solid var(--border); text-transform: capitalize; }
+.modal-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; padding: 16px 18px; background: var(--card); border-bottom: 1px solid var(--border); }
 .modal-body { padding: 18px 18px calc(18px + env(safe-area-inset-bottom)); }
 
 /* ---------- Tablet / desktop ---------- */
@@ -363,3 +363,17 @@ textarea.input { resize: vertical; }
 .oil-list { list-style: none; margin: 0; padding: 0; }
 .oil-list li { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border); }
 .oil-list .grow { display: flex; flex-direction: column; }
+
+/* ---------- App lock / security ---------- */
+.lock { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; }
+.lock-card { width: 100%; max-width: 380px; background: var(--card); border: 1px solid var(--border); border-radius: 28px; padding: 28px 24px; box-shadow: var(--shadow); text-align: center; display: flex; flex-direction: column; gap: 14px; align-items: stretch; }
+.lock-card .brand-logo { margin: 0 auto; }
+.lock-card h2 { font-size: 1.3rem; }
+.lock-card p { margin: 0; }
+.lock-input { text-align: center; font-size: 1.4rem; letter-spacing: .3em; padding: 14px; }
+.security-note { display: flex; gap: 10px; align-items: flex-start; margin-bottom: 14px; }
+.security-note ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.6; }
+.lock-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 14px; }
+.lock-row .grow { display: flex; flex-direction: column; }
+.btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.bad-row td { color: var(--red); opacity: .7; }

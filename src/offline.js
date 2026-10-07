@@ -4,12 +4,38 @@
 
 const k = (uid, name) => `st:${uid}:${name}`;
 
+import { encryptJSON, decryptJSON } from "./lock";
+
+// When app lock is on, everything saved here is AES-GCM encrypted with the in-memory data key.
+let dataKey = null;
+let encryptOn = false;
+let chain = Promise.resolve();
+export function setLocalCrypto(key, on) { dataKey = key; encryptOn = on; }
+export const localFlush = () => chain;
+export const getLocalKey = () => dataKey;
+
 export const local = {
-  get(uid, name, fallback) {
-    try { const v = localStorage.getItem(k(uid, name)); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+  async get(uid, name, fallback) {
+    try {
+      const v = localStorage.getItem(k(uid, name));
+      if (!v) return fallback;
+      const obj = JSON.parse(v);
+      if (obj && obj.__enc) return dataKey ? await decryptJSON(dataKey, obj) : fallback;
+      return obj;
+    } catch { return fallback; }
   },
   set(uid, name, value) {
-    try { localStorage.setItem(k(uid, name), JSON.stringify(value)); } catch { /* storage full or blocked */ }
+    chain = chain.then(async () => {
+      try {
+        if (encryptOn) {
+          if (!dataKey) return; // locked: never write readable data
+          localStorage.setItem(k(uid, name), JSON.stringify(await encryptJSON(dataKey, value)));
+        } else {
+          localStorage.setItem(k(uid, name), JSON.stringify(value));
+        }
+      } catch { /* storage full or blocked */ }
+    });
+    return chain;
   },
   clear(uid) {
     try { Object.keys(localStorage).filter((x) => x.startsWith(`st:${uid}:`)).forEach((x) => localStorage.removeItem(x)); } catch { /* ignore */ }

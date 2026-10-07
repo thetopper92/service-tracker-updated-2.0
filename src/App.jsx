@@ -12,7 +12,10 @@ import { TABS, DEFAULT_SETTINGS } from "./data";
 import { oilStatus } from "./oil";
 import { showLocalNotification } from "./push";
 import { todayISO } from "./formatters";
-import { local, lastUser, tempId, queueCreate, queueUpdate, queueDelete, queueSettings, applyQueue, flushQueue } from "./offline";
+import { local, lastUser, tempId, queueCreate, queueUpdate, queueDelete, queueSettings, applyQueue, flushQueue, setLocalCrypto, getLocalKey } from "./offline";
+import { getLockConfig, saveLockConfig } from "./lock";
+import { removeBiometric } from "./bio";
+import LockScreen from "./components/LockScreen";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -36,6 +39,12 @@ export default function App() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
+  const [locked, setLockedState] = useState(false);
+  const lockedRef = useRef(false);
+  const setLocked = (v) => { lockedRef.current = v; setLockedState(v); };
+  const pendingStartRef = useRef(null);
+  const hiddenAtRef = useRef(0);
+  const stateRef = useRef({});
   const uidRef = useRef(null);
   const queueRef = useRef([]);
   const syncingRef = useRef(false);
@@ -84,7 +93,7 @@ export default function App() {
 
   // Send offline changes to the server, then pull the latest data (also picks up changes from other phones)
   const sync = useCallback(async ({ refresh = true } = {}) => {
-    if (!uidRef.current) return;
+    if (!uidRef.current || lockedRef.current) return;
     if (syncingRef.current) { syncAgainRef.current = true; return; }
     syncingRef.current = true;
     setSyncing(true);
@@ -116,18 +125,16 @@ export default function App() {
     }
   }, [fetchAll, setQueue, endSession]);
 
-  const startSession = useCallback((u, { offline = false } = {}) => {
-    uidRef.current = u.id;
-    const q = local.get(u.id, "queue", []);
+  // Load this phone's saved copy (decrypted if app lock is on), then sync with the server
+  const loadLocal = useCallback(async (uid, { offline = false } = {}) => {
+    const q = await local.get(uid, "queue", []);
+    if (uid !== uidRef.current) return;
     queueRef.current = q;
     setQueueState(q);
     const pendingSettings = q.find((o) => o.op === "settings")?.data;
-    const s = { ...DEFAULT_SETTINGS, ...u.settings, ...(pendingSettings || {}) };
-    setUser(u);
-    setSettings(s);
-    setTab(s.defaultTab || "dashboard");
-    lastUser.set({ ...u, settings: s });
-    const cached = local.get(u.id, "data", null);
+    if (pendingSettings) setSettings((s) => ({ ...s, ...pendingSettings }));
+    const cached = await local.get(uid, "data", null);
+    if (uid !== uidRef.current) return;
     if (cached) {
       setServerTx(cached.transactions || []);
       setCategories(cached.categories || []);
@@ -137,9 +144,83 @@ export default function App() {
     if (!offline) sync();
   }, [sync]);
 
+  const startSession = useCallback((u, opts = {}) => {
+    uidRef.current = u.id;
+    const s = { ...DEFAULT_SETTINGS, ...u.settings };
+    setUser(u);
+    setSettings(s);
+    setTab(s.defaultTab || "dashboard");
+    lastUser.set({ id: u.id, name: u.name, email: u.email, settings: s });
+    const cfg = getLockConfig(u.id);
+    if (cfg?.enabled) {
+      setLocalCrypto(null, true);   // nothing is read or written until unlocked
+      pendingStartRef.current = opts;
+      setLocked(true);
+      return;
+    }
+    setLocalCrypto(null, false);
+    loadLocal(u.id, opts);
+  }, [loadLocal]);
+
+  const onUnlock = async (dek) => {
+    setLocalCrypto(dek, true);
+    setLocked(false);
+    if (pendingStartRef.current) {
+      const o = pendingStartRef.current;
+      pendingStartRef.current = null;
+      await loadLocal(uidRef.current, o);
+    } else {
+      sync();
+    }
+  };
+
+  // Save the current copy again (encrypted or plain) after app lock is turned on/off
+  const persistLocal = async () => {
+    const uid = uidRef.current;
+    const st = stateRef.current;
+    await local.set(uid, "data", { transactions: st.serverTx, categories: st.categories, assets: st.assets, oil: st.oilChanges, savedAt: Date.now() });
+    await local.set(uid, "queue", queueRef.current);
+  };
+  const onLockEnabled = async (dek) => { setLocalCrypto(dek, true); await persistLocal(); };
+  const onLockDisabled = async () => { setLocalCrypto(getLocalKey(), false); await persistLocal(); };
+
+  // Remove everything about this account from the phone (used by "forgot passcode" and too many wrong tries)
+  const wipeDevice = async (reason) => {
+    const uid = uidRef.current;
+    if (uid) {
+      const cfg = getLockConfig(uid);
+      await removeBiometric(cfg?.bio);
+      saveLockConfig(uid, null);
+      local.clear(uid);
+    }
+    lastUser.clear();
+    try { await api.post("/api/auth/logout"); } catch { try { localStorage.setItem("st:forceLogout", "1"); } catch { /* ignore */ } }
+    setLocalCrypto(null, false);
+    pendingStartRef.current = null;
+    setLocked(false);
+    endSession(false);
+    if (reason) setError(reason);
+  };
+
+  // Auto-lock after the app has been in the background for the chosen time
+  useEffect(() => {
+    const onVis = () => {
+      const uid = uidRef.current;
+      const cfg = uid && getLockConfig(uid);
+      if (!cfg?.enabled) return;
+      if (document.visibilityState === "hidden") hiddenAtRef.current = Date.now();
+      else if (hiddenAtRef.current && Date.now() - hiddenAtRef.current >= (cfg.autoLock ?? 1) * 60000) setLocked(true);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => document.removeEventListener("visibilitychange", onVis);
+  }, []);
+
   // Start-up: use the server if reachable, otherwise open the last account from this phone
   useEffect(() => {
-    api.get("/api/auth/me")
+    let force = false;
+    try { force = localStorage.getItem("st:forceLogout") === "1"; } catch { /* ignore */ }
+    (force ? api.post("/api/auth/logout").then(() => { localStorage.removeItem("st:forceLogout"); }).catch(() => {}) : Promise.resolve())
+      .then(() => api.get("/api/auth/me"))
       .then(({ user: u }) => {
         if (u) startSession(u);
         else lastUser.clear();
@@ -249,7 +330,11 @@ export default function App() {
     const n = queueRef.current.length;
     if (n && !confirm(`${n} change${n > 1 ? "s" : ""} haven't synced yet and will be lost. Log out anyway?`)) return;
     try { await api.post("/api/auth/logout"); } catch (e) { if (e.offline) { alert("Connect to the internet to log out."); return; } }
+    const uid = uidRef.current;
+    const cfg = uid && getLockConfig(uid);
+    if (cfg) { await removeBiometric(cfg.bio); saveLockConfig(uid, null); }
     lastUser.clear();
+    setLocalCrypto(null, false);
     endSession(false);
   };
 
@@ -263,8 +348,25 @@ export default function App() {
     await sync();
   };
 
+  stateRef.current = { serverTx, categories, assets, oilChanges };
+
   if (loading) {
     return <div className="splash"><div className="brand-logo spin"><Icon name="wallet" size={28} /></div></div>;
+  }
+
+  if (user && locked) {
+    return (
+      <LockScreen
+        uid={user.id}
+        cfg={getLockConfig(user.id)}
+        name={user.name}
+        onUnlock={onUnlock}
+        onForgot={() => {
+          if (confirm("Log out and remove the data saved on this phone? Your data stays safe in your account — log in again with your account password.")) wipeDevice();
+        }}
+        onWipe={() => wipeDevice("Too many wrong passcodes. For your security the data on this phone was removed and you were logged out. Your data is safe in your account.")}
+      />
+    );
   }
 
   if (!user) {
@@ -323,6 +425,7 @@ export default function App() {
         {tab === "growth" && <Growth {...common} />}
         {tab === "transactions" && <Transactions {...common} onEdit={(tx) => setTxModal({ tx })} onDelete={deleteTx} onReceived={markReceived} />}
         {tab === "categories" && <Categories {...common} onSettings={saveSettings} reload={reload} onLogout={logout} focus={moreFocus}
+          onLockEnabled={onLockEnabled} onLockDisabled={onLockDisabled} onLockNow={() => setLocked(true)}
           onEdit={(tx) => setTxModal({ tx })} onReceived={markReceived} goGraphs={() => { setTab("graphs"); window.scrollTo(0, 0); }} />}
       </main>
 
