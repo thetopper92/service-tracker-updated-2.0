@@ -41,7 +41,7 @@ export default function DbImport({ file, settings, onClose, onDone }) {
     let alive = true;
     (async () => {
       try {
-        const d = await openDb(await file.arrayBuffer());
+        const d = await openDb(file.buffer || (await file.arrayBuffer()));
         if (!alive) return;
         const t = listTables(d).filter((x) => x.count > 0);
         if (!t.length) throw new Error("This database has no tables with data.");

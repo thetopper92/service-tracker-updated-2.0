@@ -84,17 +84,33 @@ export default function Categories({ user, categories, transactions, assets, oil
     reload(true);
   };
 
-  // One button for every backup type: .json, password-protected .stbak, and .db / .sqlite databases
+  // One button for every backup type: .json, password-protected .stbak, and .db / .sqlite databases.
+  // The file is read immediately: on Android, resetting the picker (or waiting) can revoke permission to read it.
   const restore = async (e) => {
-    const file = e.target.files?.[0];
-    e.target.value = "";
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
-    const name = file.name.toLowerCase();
+    let buffer;
     try {
-      if (/\.(db|sqlite|sqlite3|db3)$/.test(name)) { setDbFile(file); return; }
-      const text = await file.text();
+      buffer = await file.arrayBuffer();
+    } catch (err) {
+      input.value = "";
+      alert(err?.name === "NotReadableError" || err?.name === "NotFoundError"
+        ? "Your phone didn't allow the app to read this file. Copy it into your phone's Downloads folder (not straight from Google Drive, WhatsApp or another app) and choose it again from there."
+        : `Couldn't read this file: ${err?.message || err}`);
+      return;
+    }
+    input.value = "";
+    const bytes = new Uint8Array(buffer, 0, Math.min(16, buffer.byteLength));
+    const isSqlite = new TextDecoder().decode(bytes).startsWith("SQLite format 3");
+    try {
+      if (isSqlite || /\.(db|sqlite|sqlite3|db3)$/i.test(file.name)) {
+        setDbFile({ name: file.name, size: file.size, buffer });
+        return;
+      }
+      const text = new TextDecoder().decode(buffer);
       let data;
-      try { data = JSON.parse(text); } catch { throw new Error("This file is not a valid backup."); }
+      try { data = JSON.parse(text); } catch { throw new Error("This file is not a valid backup or .db database."); }
       if (data?.format === "ServiceTracker-encrypted-backup") { setPwPrompt({ mode: "decrypt", file: data }); return; }
       if (!Array.isArray(data?.transactions)) throw new Error("This file is not a Service Tracker backup.");
       await restoreData(data);
