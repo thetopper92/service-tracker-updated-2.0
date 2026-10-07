@@ -202,7 +202,7 @@ textarea.input { resize: vertical; }
 .table { width: 100%; border-collapse: collapse; font-size: .9rem; white-space: nowrap; }
 .table th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 8px; }
 .table td { padding: 10px 8px; border-top: 1px solid var(--border); }
-.pill { padding: 3px 8px; border-radius: 99px; font-size: .78rem; font-weight: 700; }
+.pill { background: var(--soft); color: var(--muted); padding: 3px 8px; border-radius: 99px; font-size: .78rem; font-weight: 700; }
 .pill.good { background: rgba(34, 180, 108, .14); color: var(--green); }
 .pill.bad { background: rgba(224, 92, 92, .14); color: var(--red); }
 
@@ -391,3 +391,36 @@ textarea.input { resize: vertical; }
 .value-row.undecided { outline: 2px dashed var(--amber); }
 .value-row .grow { min-width: 120px; }
 .import-history { margin-top: 16px; }
+
+/* ---- Growth comparison tabs ---- */
+.tabs-seg { display: flex; width: 100%; margin: 4px 0 2px; }
+.tabs-seg button { padding: 9px 6px; font-size: .86rem; white-space: normal; line-height: 1.15; }
+.compare-list { display: flex; flex-direction: column; }
+.compare-row { display: grid; grid-template-columns: 76px 1fr auto; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); }
+.compare-row:first-child { border-top: 0; }
+.compare-label { font-weight: 600; color: var(--muted); font-size: .9rem; }
+.compare-vals { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.compare-change { display: flex; flex-direction: column; align-items: flex-end; gap: 3px; text-align: right; }
+.year-cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.year-card .panel-head h3 { font-size: 1.05rem; }
+.input.compact { width: auto; padding: 7px 10px; font-size: .9rem; }
+.table tr.in-progress td { color: var(--muted); font-style: italic; background: var(--soft); }
+
+/* ---- Dashboard date range ---- */
+.page-head .seg button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.date-range { display: flex; flex-direction: column; gap: 10px; }
+.date-range-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.date-range-row .input { min-width: 0; }
+.chip-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.date-range p { margin: 0; }
+
+/* ---- Password confirm ---- */
+.alert.warn { display: flex; gap: 8px; align-items: flex-start; background: rgba(245, 158, 11, .14); color: var(--text); }
+.alert.warn svg { flex: none; margin-top: 2px; color: #d97706; }
+.row-btns { display: flex; gap: 10px; }
+.row-btns .btn { flex: 1; }
+.btn.danger { background: var(--red); border-color: var(--red); color: #fff; }
+@media (max-width: 420px) {
+  .page-head .seg.small { width: 100%; }
+  .page-head .seg.small button { padding: 7px 4px; font-size: .8rem; }
+}
