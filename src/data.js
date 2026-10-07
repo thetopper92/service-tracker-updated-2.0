@@ -42,7 +42,8 @@ export const DATE_FORMATS = ["YYYY-MM-DD","DD/MM/YYYY","MM/DD/YYYY","DD-MM-YYYY"
 export const DEFAULT_SETTINGS = {
   currency: "$", currencyPos: "before", dateFormat: "YYYY-MM-DD",
   language: "en", decimalSep: ".", thousandSep: ",", showCents: true, defaultTab: "dashboard", theme: "light",
-  investAmount: 0, investDate: "", investIncludeEquip: true
+  investAmount: 0, investDate: "", investIncludeEquip: true,
+  oilInterval: 90
 };
 
 export const TABS = [

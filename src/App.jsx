@@ -9,6 +9,9 @@ import Categories from "./components/Categories";
 import TxForm from "./components/TxForm";
 import { api } from "./api";
 import { TABS, DEFAULT_SETTINGS } from "./data";
+import { oilStatus } from "./oil";
+import { showLocalNotification } from "./push";
+import { todayISO } from "./formatters";
 import { local, lastUser, tempId, queueCreate, queueUpdate, queueDelete, queueSettings, applyQueue, flushQueue } from "./offline";
 
 export default function App() {
@@ -23,6 +26,8 @@ export default function App() {
   const [serverTx, setServerTx] = useState([]);
   const [categories, setCategories] = useState([]);
   const [assets, setAssets] = useState([]);
+  const [oilChanges, setOilChanges] = useState([]);
+  const [moreFocus, setMoreFocus] = useState(null); // { id } section to open in More
   const [queue, setQueueState] = useState([]);
   const [online, setOnline] = useState(() => (typeof navigator === "undefined" ? true : navigator.onLine));
   const [syncing, setSyncing] = useState(false);
@@ -54,12 +59,15 @@ export default function App() {
 
   const fetchAll = useCallback(async () => {
     const uid = uidRef.current;
-    const [tx, cats, as] = await Promise.all([api.get("/api/transactions"), api.get("/api/categories"), api.get("/api/assets")]);
+    const [tx, cats, as, oil] = await Promise.all([
+      api.get("/api/transactions"), api.get("/api/categories"), api.get("/api/assets"), api.get("/api/oil"),
+    ]);
     if (uid !== uidRef.current) return; // logged out meanwhile
     setServerTx(tx);
     setCategories(cats);
     setAssets(as);
-    local.set(uid, "data", { transactions: tx, categories: cats, assets: as, savedAt: Date.now() });
+    setOilChanges(oil);
+    local.set(uid, "data", { transactions: tx, categories: cats, assets: as, oil, savedAt: Date.now() });
   }, []);
 
   const endSession = useCallback((keepLocal) => {
@@ -71,6 +79,7 @@ export default function App() {
     setServerTx([]);
     setCategories([]);
     setAssets([]);
+    setOilChanges([]);
   }, []);
 
   // Send offline changes to the server, then pull the latest data (also picks up changes from other phones)
@@ -123,6 +132,7 @@ export default function App() {
       setServerTx(cached.transactions || []);
       setCategories(cached.categories || []);
       setAssets(cached.assets || []);
+      setOilChanges(cached.oil || []);
     }
     if (!offline) sync();
   }, [sync]);
@@ -162,6 +172,33 @@ export default function App() {
 
   const onAuth = useCallback((u) => { setError(""); startSession(u); }, [startSession]);
 
+  // Links from notifications: /?section=oil opens that section in More
+  useEffect(() => {
+    if (!user) return;
+    const openFromUrl = (url) => {
+      const id = new URL(url, location.origin).searchParams.get("section");
+      if (id) goMore(id);
+    };
+    openFromUrl(location.href);
+    if (location.search) history.replaceState(null, "", "/");
+    const onMsg = (e) => { if (e.data?.type === "open") openFromUrl(e.data.url); };
+    navigator.serviceWorker?.addEventListener("message", onMsg);
+    return () => navigator.serviceWorker?.removeEventListener("message", onMsg);
+  }, [user?.id]);
+
+  // Oil change status + a phone notification once a day when it's due and the app is opened
+  const oil = useMemo(() => oilStatus(oilChanges, settings.oilInterval), [oilChanges, settings.oilInterval]);
+  useEffect(() => {
+    if (!user || !oil.has || !oil.due) return;
+    const key = `st:${user.id}:oilLocalNotified`;
+    const today = todayISO();
+    try { if (localStorage.getItem(key) === today) return; } catch { /* ignore */ }
+    const body = oil.left === 0 ? `It's been ${oil.since} days since your last oil change.` : `Oil change overdue by ${-oil.left} days (${oil.since} days since last change).`;
+    showLocalNotification("Oil change due", body, "oil").then((shown) => {
+      if (shown) { try { localStorage.setItem(key, today); } catch { /* ignore */ } }
+    });
+  }, [user?.id, oil.has, oil.due, oil.since]);
+
   const saveSettings = async (next) => {
     setSettings(next);
     if (user) lastUser.set({ ...user, settings: next });
@@ -182,10 +219,22 @@ export default function App() {
       category: data.category,
       date: data.date,
       description: data.description || "",
+      unpaid: data.type === "income" && !!data.unpaid,
     };
     if (id) setQueue((q) => queueUpdate(q, id, clean));
     else setQueue((q) => queueCreate(q, tempId(), clean));
     sync();
+  };
+
+  const markReceived = (t) => {
+    saveTx({ ...t, unpaid: false }, t.id);
+  };
+
+  const goMore = (id) => { setTab("categories"); setMoreFocus({ id, at: Date.now() }); };
+
+  const oilDoneToday = async () => {
+    try { await api.post("/api/oil", { date: todayISO() }); await sync(); }
+    catch (e) { alert(e.message); }
   };
 
   const deleteTx = (t) => {
@@ -229,7 +278,7 @@ export default function App() {
     );
   }
 
-  const common = { user, transactions, categories, assets, settings, dark, online };
+  const common = { user, transactions, categories, assets, oilChanges, settings, dark, online };
   const openAdd = (type) => { setFabOpen(false); setTxModal({ type }); };
   const status = <SyncStatus online={online} syncing={syncing} pending={queue.length} onClick={() => sync()} />;
 
@@ -268,11 +317,13 @@ export default function App() {
       <main className="main">
         {error && <div className="alert">{error} <button className="link" onClick={() => sync()}>Retry</button></div>}
         {notice && <div className="alert">{notice} <button className="link" onClick={() => setNotice("")}>Dismiss</button></div>}
-        {tab === "dashboard" && <Dashboard {...common} onEdit={(tx) => setTxModal({ tx })} goHistory={() => setTab("transactions")} />}
+        {tab === "dashboard" && <Dashboard {...common} onEdit={(tx) => setTxModal({ tx })} onDelete={deleteTx} onReceived={markReceived}
+          goHistory={() => setTab("transactions")} oil={oil} onOilDone={oilDoneToday} goOil={() => goMore("oil")} />}
         {tab === "graphs" && <Graphs {...common} />}
         {tab === "growth" && <Growth {...common} />}
-        {tab === "transactions" && <Transactions {...common} onEdit={(tx) => setTxModal({ tx })} onDelete={deleteTx} />}
-        {tab === "categories" && <Categories {...common} onSettings={saveSettings} reload={reload} onLogout={logout} goGraphs={() => { setTab("graphs"); window.scrollTo(0, 0); }} />}
+        {tab === "transactions" && <Transactions {...common} onEdit={(tx) => setTxModal({ tx })} onDelete={deleteTx} onReceived={markReceived} />}
+        {tab === "categories" && <Categories {...common} onSettings={saveSettings} reload={reload} onLogout={logout} focus={moreFocus}
+          onEdit={(tx) => setTxModal({ tx })} onReceived={markReceived} goGraphs={() => { setTab("graphs"); window.scrollTo(0, 0); }} />}
       </main>
 
       {/* Floating add button (right side) */}

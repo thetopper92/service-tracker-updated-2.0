@@ -317,3 +317,49 @@ textarea.input { resize: vertical; }
 .tx-main b { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 8px; }
 .tx-main b .pill.pending { margin-left: 0; }
 @media (max-width: 360px) { .topbar .side-brand b span { display: none; } }
+
+/* ---------- More: collapsible sections ---------- */
+.sections { display: flex; flex-direction: column; gap: 10px; }
+.section { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); overflow: hidden; scroll-margin-top: 70px; }
+.section-head { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 0; background: none; text-align: left; }
+.section-head:hover { background: var(--soft); }
+.section-icon { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: rgba(79, 142, 247, .12); color: var(--blue); flex: none; }
+.section-icon.amber { background: rgba(247, 183, 49, .2); color: #b7791f; }
+.section-icon.red { background: rgba(224, 92, 92, .15); color: var(--red); }
+.section-title { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.section-title b { font-weight: 700; }
+.section-title span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chev { color: var(--muted); transition: transform .2s; flex: none; }
+.section.open .chev { transform: rotate(180deg); }
+.section-body { padding: 4px 16px 16px; border-top: 1px solid var(--border); padding-top: 14px; animation: rise .15s ease-out; }
+.section-toolbar { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+
+/* ---------- Money owed ---------- */
+.owed-text { color: #c98a00; }
+[data-theme="dark"] .owed-text { color: var(--amber); }
+.pill.owed { background: rgba(247, 183, 49, .2); color: #b7791f; font-size: .68rem; }
+.icon-btn.ok:hover { color: var(--green); }
+.owed-toggle { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 1px solid var(--border); border-radius: 14px; cursor: pointer; }
+.owed-toggle.on { border-color: var(--amber); background: rgba(247, 183, 49, .1); }
+.owed-toggle input { width: 20px; height: 20px; margin-top: 2px; accent-color: #e0a100; flex: none; }
+.owed-toggle span { display: flex; flex-direction: column; gap: 2px; }
+.owed-toggle small { color: var(--muted); }
+
+/* ---------- Oil change ---------- */
+.due-banner { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--radius); background: rgba(224, 92, 92, .1); border: 1px solid rgba(224, 92, 92, .35); color: var(--red); flex-wrap: wrap; }
+.due-banner .grow { display: flex; flex-direction: column; color: var(--text); min-width: 160px; }
+.due-banner .btn:not(.ghost) { background: var(--red); color: #fff; }
+.oil-status { background: var(--soft); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+.oil-big { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.oil-big b { font-size: 2.4rem; font-weight: 800; letter-spacing: -.03em; line-height: 1; }
+.oil-status.soon .oil-big b { color: #c98a00; }
+.oil-status.due .oil-big b { color: var(--red); }
+.oil-status.due .progress-bar div { background: var(--red); }
+.oil-status.soon .progress-bar div { background: var(--amber); }
+.oil-meta { display: flex; flex-wrap: wrap; gap: 6px 18px; }
+.oil-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 14px 0; }
+.reminder-box { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px; border: 1px dashed var(--border); border-radius: 14px; color: var(--muted); margin-bottom: 12px; }
+.reminder-box .grow { color: var(--text); min-width: 180px; }
+.oil-list { list-style: none; margin: 0; padding: 0; }
+.oil-list li { display: flex; align-items: center; gap: 8px; padding: 10px 0; border-top: 1px solid var(--border); }
+.oil-list .grow { display: flex; flex-direction: column; }
