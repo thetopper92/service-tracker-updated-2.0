@@ -4,7 +4,7 @@ import { fmtC, fmtD } from "../formatters";
 
 const PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All time"]];
 
-export default function Dashboard({ user, transactions, categories, settings, onEdit, goHistory }) {
+export default function Dashboard({ user, transactions, categories, settings, onEdit, onDelete, onReceived, goHistory, oil, onOilDone, goOil }) {
   const [period, setPeriod] = useState("month");
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
@@ -16,6 +16,7 @@ export default function Dashboard({ user, transactions, categories, settings, on
 
   const inc = list.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const exp = list.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
+  const owed = list.filter((t) => t.type === "income" && t.unpaid).reduce((s, t) => s + t.amount, 0);
   const profit = inc - exp;
   const margin = inc > 0 ? (profit / inc) * 100 : 0;
   const roi = exp > 0 ? (profit / exp) * 100 : 0;
@@ -44,9 +45,21 @@ export default function Dashboard({ user, transactions, categories, settings, on
         </div>
       </div>
 
+      {oil?.has && oil.due && (
+        <div className="due-banner">
+          <Icon name="oil" size={22} />
+          <div className="grow">
+            <b>Oil change due</b>
+            <span className="small">{oil.since} days since your last oil change{oil.left < 0 ? ` · ${-oil.left} day${oil.left === -1 ? "" : "s"} overdue` : ""}</span>
+          </div>
+          <button className="btn sm" onClick={onOilDone}>Done today</button>
+          <button className="btn sm ghost" onClick={goOil}>View</button>
+        </div>
+      )}
+
       <div className="cards">
         <Stat label="Net profit" value={fmtC(profit, settings)} icon="wallet" tone={profit >= 0 ? "blue" : "red"} />
-        <Stat label="Revenue" value={fmtC(inc, settings)} icon="up" tone="green" />
+        <Stat label="Revenue" value={fmtC(inc, settings)} icon="up" tone="green" sub={owed > 0 ? `incl. ${fmtC(owed, settings)} not received` : null} />
         <Stat label="Expenses" value={fmtC(exp, settings)} icon="down" tone="red" />
         <Stat label="Profit margin" value={`${margin.toFixed(1)}%`} sub={`ROI ${roi.toFixed(1)}%`} icon="trend" tone="amber" />
       </div>
@@ -62,13 +75,22 @@ export default function Dashboard({ user, transactions, categories, settings, on
           ) : (
             <ul className="tx-list">
               {list.slice(0, 6).map((t) => (
-                <li key={t.id} className="tx-row" onClick={() => onEdit(t)}>
+                <li key={t.id} className="tx-row">
                   <span className="dot" style={{ background: colorOf(t.type, t.category) }} />
-                  <div className="tx-main">
-                    <b>{t.category}</b>
+                  <div className="tx-main" onClick={() => onEdit(t)}>
+                    <b>
+                      {t.category}
+                      {t.unpaid && <span className="pill owed">Not received</span>}
+                      {t.pending && <span className="pill pending">Not synced</span>}
+                    </b>
                     <span className="muted small">{fmtD(t.date, settings)}{t.description ? ` · ${t.description}` : ""}</span>
                   </div>
                   <span className={`amt ${t.type}`}>{t.type === "income" ? "+" : "-"}{fmtC(t.amount, settings)}</span>
+                  <div className="row-actions">
+                    {t.unpaid && <button className="icon-btn ok" onClick={() => onReceived(t)} aria-label="Mark received" title="Mark received"><Icon name="check" size={17} /></button>}
+                    <button className="icon-btn" onClick={() => onEdit(t)} aria-label="Edit"><Icon name="edit" size={17} /></button>
+                    <button className="icon-btn danger" onClick={() => onDelete(t)} aria-label="Delete"><Icon name="trash" size={17} /></button>
+                  </div>
                 </li>
               ))}
             </ul>

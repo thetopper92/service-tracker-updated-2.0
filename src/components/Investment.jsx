@@ -5,7 +5,7 @@ import { computePayback } from "../payback";
 import { paybackText } from "./Payback";
 import { fmtC } from "../formatters";
 
-export default function Investment({ transactions, assets, settings, onSettings, goGraphs }) {
+export default function Investment({ transactions, assets, settings, onSettings, goGraphs, bare }) {
   const [amount, setAmount] = useState(settings.investAmount || "");
   const [saved, setSaved] = useState(false);
   useEffect(() => { setAmount(settings.investAmount || ""); }, [settings.investAmount]);
@@ -21,8 +21,8 @@ export default function Investment({ transactions, assets, settings, onSettings,
   };
 
   return (
-    <div className="panel">
-      <div className="panel-head"><h3><Icon name="trend" size={18} /> Business Investment</h3></div>
+    <div className={bare ? "" : "panel"}>
+      {!bare && <div className="panel-head"><h3><Icon name="trend" size={18} /> Business Investment</h3></div>}
       <form onSubmit={saveAmount} className="invest-form">
         <Inp label="Total business cost (money put in)" type="number" step="0.01" min="0" inputMode="decimal"
           value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="e.g. 50000" />

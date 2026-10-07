@@ -5,17 +5,17 @@ import { MONTHS } from "../data";
 import { fmtC, fmtD } from "../formatters";
 import { exportCSV } from "../exportCSV";
 
-export default function Transactions({ transactions, categories, settings, onEdit, onDelete }) {
+export default function Transactions({ transactions, categories, settings, onEdit, onDelete, onReceived }) {
   const [search, setSearch] = useState("");
   const [type, setType] = useState("all");
   const [month, setMonth] = useState("all");
   const [cat, setCat] = useState("all");
 
   const months = useMemo(() => [...new Set(transactions.map((t) => t.date.slice(0, 7)))].sort().reverse(), [transactions]);
-  const catNames = useMemo(() => [...new Set(categories.filter((c) => type === "all" || c.type === type).map((c) => c.name))], [categories, type]);
+  const catNames = useMemo(() => [...new Set(categories.filter((c) => type === "all" || c.type === (type === "owed" ? "income" : type)).map((c) => c.name))], [categories, type]);
 
   const list = transactions.filter((t) =>
-    (type === "all" || t.type === type) &&
+    (type === "all" || (type === "owed" ? t.type === "income" && t.unpaid : t.type === type)) &&
     (month === "all" || t.date.startsWith(month)) &&
     (cat === "all" || t.category === cat) &&
     (!search || `${t.category} ${t.description} ${t.amount}`.toLowerCase().includes(search.toLowerCase()))
@@ -48,6 +48,7 @@ export default function Transactions({ transactions, categories, settings, onEdi
           <option value="all">All types</option>
           <option value="income">Income</option>
           <option value="expense">Expense</option>
+          <option value="owed">Not received</option>
         </select>
         <select className="input" value={month} onChange={(e) => setMonth(e.target.value)}>
           <option value="all">All months</option>
@@ -77,11 +78,16 @@ export default function Transactions({ transactions, categories, settings, onEdi
                 <li key={t.id} className="tx-row">
                   <span className="dot" style={{ background: colorOf(t) }} />
                   <div className="tx-main" onClick={() => onEdit(t)}>
-                    <b>{t.category}{t.pending && <span className="pill pending">Not synced</span>}</b>
+                    <b>
+                      {t.category}
+                      {t.unpaid && <span className="pill owed">Not received</span>}
+                      {t.pending && <span className="pill pending">Not synced</span>}
+                    </b>
                     {t.description && <span className="muted small">{t.description}</span>}
                   </div>
                   <span className={`amt ${t.type}`}>{t.type === "income" ? "+" : "-"}{fmtC(t.amount, settings)}</span>
                   <div className="row-actions">
+                    {t.unpaid && <button className="icon-btn ok" onClick={() => onReceived(t)} aria-label="Mark received" title="Mark received"><Icon name="check" size={17} /></button>}
                     <button className="icon-btn" onClick={() => onEdit(t)} aria-label="Edit"><Icon name="edit" size={17} /></button>
                     <button className="icon-btn danger" onClick={() => onDelete(t)} aria-label="Delete"><Icon name="trash" size={17} /></button>
                   </div>

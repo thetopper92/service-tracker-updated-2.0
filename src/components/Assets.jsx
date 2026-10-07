@@ -8,7 +8,7 @@ import { fmtC, fmtD, todayISO } from "../formatters";
 const STATUS = { active: "In use", sold: "Sold", written_off: "Written off" };
 const FILTERS = [["active", "In use"], ["sold", "Sold"], ["written_off", "Written off"], ["all", "All"]];
 
-export default function Assets({ assets, settings, reload }) {
+export default function Assets({ assets, settings, reload, bare }) {
   const [filter, setFilter] = useState("active");
   const [form, setForm] = useState(null);   // {} new, asset = edit
   const [sell, setSell] = useState(null);   // asset
@@ -37,10 +37,10 @@ export default function Assets({ assets, settings, reload }) {
   };
 
   return (
-    <div className="panel">
-      <div className="panel-head">
-        <h3><Icon name="box" size={18} /> Equipment &amp; Assets</h3>
-        <button className="btn ghost sm" onClick={() => setForm({})}><Icon name="plus" size={16} /> Add</button>
+    <div className={bare ? "" : "panel"}>
+      <div className={bare ? "section-toolbar" : "panel-head"}>
+        {!bare && <h3><Icon name="box" size={18} /> Equipment &amp; Assets</h3>}
+        <button className="btn ghost sm" onClick={() => setForm({})}><Icon name="plus" size={16} /> Add equipment</button>
       </div>
 
       <div className="kv-grid">

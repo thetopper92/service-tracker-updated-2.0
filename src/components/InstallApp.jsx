@@ -5,7 +5,7 @@ const isStandalone = () =>
   window.matchMedia?.("(display-mode: standalone)").matches || window.navigator.standalone === true;
 const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
 
-export default function InstallApp() {
+export default function InstallApp({ bare }) {
   const [canPrompt, setCanPrompt] = useState(!!window.__installPrompt);
   const [installed, setInstalled] = useState(isStandalone());
 
@@ -31,8 +31,8 @@ export default function InstallApp() {
   };
 
   return (
-    <div className="panel">
-      <div className="panel-head"><h3><Icon name="phone" size={18} /> Phone app</h3></div>
+    <div className={bare ? "" : "panel"}>
+      {!bare && <div className="panel-head"><h3><Icon name="phone" size={18} /> Phone app</h3></div>}
       {installed ? (
         <p className="note">Installed. The app works offline — changes you make without internet are saved on this phone and synced to your account automatically.</p>
       ) : canPrompt ? (

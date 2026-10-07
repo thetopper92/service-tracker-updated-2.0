@@ -55,6 +55,8 @@ export default function Graphs({ transactions, categories, assets, settings, dar
         </div>
       </div>
 
+      <OwedPanel transactions={transactions} year={year} settings={settings} axis={axis} grid={grid} tip={tip} dark={dark} />
+
       <div className="panel">
         <div className="panel-head"><h3>Net profit by month</h3></div>
         <div className="chart">
@@ -107,6 +109,42 @@ function PiePanel({ title, data, tip, settings }) {
           </ul>
         </>
       )}
+    </div>
+  );
+}
+
+function OwedPanel({ transactions, year, settings, axis, grid, tip, dark }) {
+  const allOwed = transactions.filter((t) => t.type === "income" && t.unpaid);
+  const totalOwed = allOwed.reduce((s, t) => s + t.amount, 0);
+  const rows = MONTHS.map((name) => ({ name, received: 0, owed: 0 }));
+  transactions.forEach((t) => {
+    if (t.type !== "income" || Number(t.date.slice(0, 4)) !== year) return;
+    rows[Number(t.date.slice(5, 7)) - 1][t.unpaid ? "owed" : "received"] += t.amount;
+  });
+  const yearOwed = rows.reduce((s, r) => s + r.owed, 0);
+  const yearRec = rows.reduce((s, r) => s + r.received, 0);
+
+  return (
+    <div className="panel">
+      <div className="panel-head"><h3>Sales received vs not given to me</h3></div>
+      <div className="kv-grid">
+        <div className="kv"><span className="muted small">Not received (all time)</span><b className="owed-text">{fmtC(totalOwed, settings)}</b><span className="muted small">{allOwed.length} payment{allOwed.length === 1 ? "" : "s"}</span></div>
+        <div className="kv"><span className="muted small">Received in {year}</span><b className="income">{fmtC(yearRec, settings)}</b></div>
+        <div className="kv"><span className="muted small">Not received from {year}</span><b className="owed-text">{fmtC(yearOwed, settings)}</b></div>
+      </div>
+      <div className="chart">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={rows} margin={{ left: -10, right: 4 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={grid} />
+            <XAxis dataKey="name" tick={axis} axisLine={false} tickLine={false} />
+            <YAxis tick={axis} axisLine={false} tickLine={false} tickFormatter={(v) => fmtCS(v, settings)} width={60} />
+            <Tooltip {...tip} cursor={{ fill: dark ? "#1e293b55" : "#e2e8f055" }} />
+            <Legend />
+            <Bar dataKey="received" name="Received" stackId="s" fill="#34C97B" />
+            <Bar dataKey="owed" name="Not given to me" stackId="s" fill="#F7B731" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
     </div>
   );
 }

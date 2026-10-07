@@ -13,6 +13,7 @@ export default function TxForm({ tx, defaultType = "income", categories, setting
     date: tx?.date || todayISO(),
     description: tx?.description || "",
   });
+  const [unpaid, setUnpaid] = useState(!!tx?.unpaid);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
@@ -32,7 +33,7 @@ export default function TxForm({ tx, defaultType = "income", categories, setting
     if (!f.category) return setError("Add a category for this type first (More tab).");
     setBusy(true);
     try {
-      await onSave({ ...f, type, amount: Number(f.amount) }, tx?.id);
+      await onSave({ ...f, type, amount: Number(f.amount), unpaid: type === "income" && unpaid }, tx?.id);
       onClose();
     } catch (err) {
       setError(err.message);
@@ -59,6 +60,15 @@ export default function TxForm({ tx, defaultType = "income", categories, setting
           <Inp label="Category" value={f.category} onChange={set("category")} options={options.length ? options : [""]} />
           <Inp label="Date" type="date" value={f.date} onChange={set("date")} required />
         </div>
+        {type === "income" && (
+          <label className={`owed-toggle ${unpaid ? "on" : ""}`}>
+            <input type="checkbox" checked={unpaid} onChange={(e) => setUnpaid(e.target.checked)} />
+            <span>
+              <b>Not given to me yet</b>
+              <small>Still counted as sales. Tracked under “Money owed to me” until you mark it received.</small>
+            </span>
+          </label>
+        )}
         <Inp label="Description" type="textarea" value={f.description} onChange={set("description")} placeholder="What was this for? (optional)" />
         {error && <div className="alert">{error}</div>}
         <button className="btn block" style={{ background: accent, color: "#fff" }} disabled={busy}>
