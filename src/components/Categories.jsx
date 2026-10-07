@@ -13,12 +13,19 @@ import Owed from "./Owed";
 import OilChange from "./OilChange";
 import { computePayback } from "../payback";
 import { oilStatus } from "../oil";
+import Security from "./Security";
+import DbImport from "./DbImport";
+import { encryptBackup, decryptBackup, getLockConfig } from "../lock";
+import { buildDb } from "../dbfile";
 
 const SECTION_KEY = "st-open-sections";
 
-export default function Categories({ user, categories, transactions, assets, oilChanges, settings, onSettings, reload, onLogout, goGraphs, onEdit, onReceived, focus }) {
+export default function Categories({ user, categories, transactions, assets, oilChanges, settings, onSettings, reload, onLogout, goGraphs, onEdit, onReceived, focus, onLockEnabled, onLockDisabled, onLockNow }) {
   const [editCat, setEditCat] = useState(null); // {type} for new, category for edit
   const [pwOpen, setPwOpen] = useState(false);
+  const [dbFile, setDbFile] = useState(null);
+  const [pwPrompt, setPwPrompt] = useState(null); // { mode: "encrypt" } | { mode: "decrypt", file }
+  const [lockTick, setLockTick] = useState(0);
   const [open, setOpen] = useState(() => {
     try { return JSON.parse(localStorage.getItem(SECTION_KEY) || "[]"); } catch { return []; }
   });
@@ -43,33 +50,55 @@ export default function Categories({ user, categories, transactions, assets, oil
     try { await api.del(`/api/categories/${c.id}`); reload(); } catch (e) { alert(e.message); }
   };
 
-  const backup = async () => {
+  const download = (blob, name) => {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+
+  const backup = async (kind) => {
     try {
       const data = await api.get("/api/backup");
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }));
-      a.download = `${BACKUP_PREFIX}${todayISO()}.json`;
-      a.click();
+      if (kind === "db") {
+        download(new Blob([await buildDb(data)], { type: "application/vnd.sqlite3" }), `${BACKUP_PREFIX}${todayISO()}.db`);
+      } else {
+        download(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }), `${BACKUP_PREFIX}${todayISO()}.json`);
+      }
     } catch (e) { alert(e.message); }
   };
 
-  const restore = (e) => {
+  const encryptedBackup = async (password) => {
+    const data = await api.get("/api/backup");
+    const file = await encryptBackup(password, data);
+    download(new Blob([JSON.stringify(file)], { type: "application/octet-stream" }), `${BACKUP_PREFIX}${todayISO()}.stbak`);
+  };
+
+  const restoreData = async (data) => {
+    if (!confirm("Restoring replaces ALL your current data with this backup. Continue?")) return;
+    const r = await api.post("/api/restore", data);
+    alert(`Restored ${r.transactions} transactions.`);
+    reload(true);
+  };
+
+  // One button for every backup type: .json, password-protected .stbak, and .db / .sqlite databases
+  const restore = async (e) => {
     const file = e.target.files?.[0];
     e.target.value = "";
     if (!file) return;
-    if (!confirm("Restoring replaces ALL your current data. Continue?")) return;
-    const reader = new FileReader();
-    reader.onload = async () => {
-      try {
-        const data = JSON.parse(reader.result);
-        const r = await api.post("/api/restore", data);
-        alert(`Restored ${r.transactions} transactions.`);
-        reload(true);
-      } catch (err) {
-        alert(err.message.includes("JSON") ? "This file is not a valid backup." : err.message);
-      }
-    };
-    reader.readAsText(file);
+    const name = file.name.toLowerCase();
+    try {
+      if (/\.(db|sqlite|sqlite3|db3)$/.test(name)) { setDbFile(file); return; }
+      const text = await file.text();
+      let data;
+      try { data = JSON.parse(text); } catch { throw new Error("This file is not a valid backup."); }
+      if (data?.format === "ServiceTracker-encrypted-backup") { setPwPrompt({ mode: "decrypt", file: data }); return; }
+      if (!Array.isArray(data?.transactions)) throw new Error("This file is not a Service Tracker backup.");
+      await restoreData(data);
+    } catch (err) {
+      alert(err.message);
+    }
   };
 
   const set = (k) => (e) => onSettings({ ...settings, [k]: e.target.type === "checkbox" ? e.target.checked : e.target.value });
@@ -149,13 +178,24 @@ export default function Categories({ user, categories, transactions, assets, oil
           <p className="muted small">Preview: {fmtC(1234567.89, settings)}</p>
         </Section>
 
-        <Section {...sec("backup")} icon="download" title="Backup & export" summary="Download, restore, CSV">
+        <Section {...sec("security")} icon="shield" title="Security & app lock"
+          summary={getLockConfig(user.id)?.enabled ? `App lock on${getLockConfig(user.id)?.bio ? " · fingerprint" : ""}` : "App lock off"} key={`sec-${lockTick}`}>
+          <Security uid={user.id}
+            onLockEnabled={async (dek) => { await onLockEnabled(dek); setLockTick((n) => n + 1); }}
+            onLockDisabled={async () => { await onLockDisabled(); setLockTick((n) => n + 1); }}
+            onLockNow={onLockNow} />
+        </Section>
+
+        <Section {...sec("backup")} icon="download" title="Backup & export" summary="Download, restore, import .db, CSV">
           <div className="btn-col">
-            <button className="btn ghost" onClick={backup}><Icon name="download" size={18} /> Download backup (JSON)</button>
-            <button className="btn ghost" onClick={() => fileRef.current?.click()}><Icon name="upload" size={18} /> Restore from backup</button>
+            <button className="btn ghost" onClick={() => setPwPrompt({ mode: "encrypt" })}><Icon name="lock" size={18} /> Download password-protected backup (.stbak)</button>
+            <button className="btn ghost" onClick={() => backup("json")}><Icon name="download" size={18} /> Download backup (.json)</button>
+            <button className="btn ghost" onClick={() => backup("db")}><Icon name="download" size={18} /> Download backup (.db database)</button>
             <button className="btn ghost" onClick={() => exportCSV(transactions)}><Icon name="list" size={18} /> Export all to CSV (Excel)</button>
-            <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={restore} />
+            <button className="btn primary" onClick={() => fileRef.current?.click()}><Icon name="upload" size={18} /> Restore or import a file…</button>
+            <input ref={fileRef} type="file" accept=".json,.stbak,.db,.sqlite,.sqlite3,.db3,application/json,application/octet-stream,application/x-sqlite3,application/vnd.sqlite3" hidden onChange={restore} />
           </div>
+          <p className="muted small">Restore accepts Service Tracker backups (.json, .stbak, .db) and can import transactions from other apps' .db / .sqlite databases.</p>
         </Section>
 
         <Section {...sec("account")} icon="key" title="Account" summary={user.email}>
@@ -179,6 +219,16 @@ export default function Categories({ user, categories, transactions, assets, oil
 
       {editCat && <CatForm cat={editCat} onClose={() => setEditCat(null)} onDone={() => { setEditCat(null); reload(); }} />}
       {pwOpen && <PasswordForm onClose={() => setPwOpen(false)} />}
+      {dbFile && <DbImport file={dbFile} settings={settings} onClose={() => setDbFile(null)}
+        onDone={async (msg) => { setDbFile(null); await reload(true); alert(msg); }} />}
+      {pwPrompt && (
+        <BackupPassword mode={pwPrompt.mode} onClose={() => setPwPrompt(null)} onSubmit={async (password) => {
+          if (pwPrompt.mode === "encrypt") { await encryptedBackup(password); setPwPrompt(null); return; }
+          const data = await decryptBackup(password, pwPrompt.file);
+          setPwPrompt(null);
+          await restoreData(data);
+        }} />
+      )}
     </div>
   );
 }
@@ -286,6 +336,37 @@ function PasswordForm({ onClose }) {
           <button className="btn primary block">Change password</button>
         </form>
       )}
+    </Modal>
+  );
+}
+
+function BackupPassword({ mode, onClose, onSubmit }) {
+  const [pw, setPw] = useState("");
+  const [again, setAgain] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const encrypting = mode === "encrypt";
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError("");
+    if (encrypting && pw.length < 6) return setError("Use at least 6 characters.");
+    if (encrypting && pw !== again) return setError("The passwords don't match.");
+    setBusy(true);
+    try { await onSubmit(pw); } catch (err) { setError(err.message); setBusy(false); }
+  };
+
+  return (
+    <Modal title={encrypting ? "Password-protected backup" : "Open protected backup"} onClose={onClose}>
+      <form onSubmit={submit} className="stack">
+        <p className="muted small">{encrypting
+          ? "The backup file is encrypted with AES-256. Keep this password safe — without it the file can't be opened."
+          : "Enter the password used when this backup was made."}</p>
+        <Inp label="Backup password" type="password" value={pw} onChange={(e) => setPw(e.target.value)} required autoFocus autoComplete="new-password" />
+        {encrypting && <Inp label="Type it again" type="password" value={again} onChange={(e) => setAgain(e.target.value)} required autoComplete="new-password" />}
+        {error && <div className="alert">{error}</div>}
+        <button className="btn primary block" disabled={busy}>{busy ? "Please wait…" : encrypting ? "Download" : "Open and restore"}</button>
+      </form>
     </Modal>
   );
 }
