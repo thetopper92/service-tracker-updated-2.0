@@ -19,7 +19,10 @@ const COLORS = ["#4F8EF7", "#34C97B", "#F7B731", "#E05C5C", "#9B59B6", "#1ABC9C"
 const DEFAULT_SETTINGS = {
   currency: "$", currencyPos: "before", dateFormat: "YYYY-MM-DD",
   language: "en", decimalSep: ".", thousandSep: ",", showCents: true, defaultTab: "dashboard", theme: "light",
+  investAmount: 0, investDate: "", investIncludeEquip: true,
 };
+const BOOL_SETTINGS = ["showCents", "investIncludeEquip"];
+const NUM_SETTINGS = ["investAmount"];
 
 // ---------- Database ----------
 let pool = null;
@@ -71,6 +74,20 @@ function ensureSchema() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS ft_tx_user_date ON ft_transactions (user_id, date);
+        CREATE TABLE IF NOT EXISTS ft_assets (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES ft_users(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          category TEXT,
+          cost DOUBLE PRECISION NOT NULL,
+          purchase_date TEXT NOT NULL,
+          notes TEXT,
+          status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','sold','written_off')),
+          sale_price DOUBLE PRECISION,
+          end_date TEXT,
+          income_tx_id INTEGER,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
       `)
       .then(() => undefined)
       .catch((e) => { schemaReady = null; throw e; });
@@ -116,7 +133,11 @@ function cleanSettings(s = {}) {
   const out = { ...DEFAULT_SETTINGS };
   for (const k of Object.keys(DEFAULT_SETTINGS)) {
     if (s[k] === undefined) continue;
-    if (k === "showCents") out[k] = !!s[k];
+    if (BOOL_SETTINGS.includes(k)) out[k] = s[k] === true || s[k] === "true";
+    else if (NUM_SETTINGS.includes(k)) {
+      const n = Number(s[k]);
+      out[k] = Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+    } else if (k === "investDate") out[k] = isDate(s[k]) ? s[k] : "";
     else out[k] = String(s[k]).slice(0, 20);
   }
   return out;
@@ -331,12 +352,109 @@ app.put("/api/transactions/:id", auth, wrap(async (req, res) => {
     [t.type, t.category, t.amount, t.date, t.description, Number(req.params.id), req.session.uid]
   );
   if (!rows[0]) return res.status(404).json({ error: "Transaction not found." });
+  await q("UPDATE ft_assets SET sale_price = $1, end_date = $2 WHERE income_tx_id = $3 AND user_id = $4",
+    [t.amount, t.date, rows[0].id, req.session.uid]);
   res.json(rows[0]);
 }));
 
 app.delete("/api/transactions/:id", auth, wrap(async (req, res) => {
-  await q("DELETE FROM ft_transactions WHERE id = $1 AND user_id = $2", [Number(req.params.id), req.session.uid]);
+  const id = Number(req.params.id);
+  await q("DELETE FROM ft_transactions WHERE id = $1 AND user_id = $2", [id, req.session.uid]);
+  // Deleting an asset's sale income puts the asset back to "in use"
+  await q("UPDATE ft_assets SET status = 'active', sale_price = NULL, end_date = NULL, income_tx_id = NULL WHERE income_tx_id = $1 AND user_id = $2",
+    [id, req.session.uid]);
   res.json({ ok: true });
+}));
+
+// ----- Equipment & assets -----
+const ASSET_COLS = "id, name, category, cost, purchase_date, notes, status, sale_price, end_date, income_tx_id";
+const SALE_CATEGORY = "Asset Sale";
+function cleanAsset(b) {
+  const cost = Number(b.cost);
+  const name = String(b.name || "").trim().slice(0, 120);
+  if (!name) return { error: "Name is required." };
+  if (!Number.isFinite(cost) || cost < 0) return { error: "Cost must be 0 or more." };
+  if (!isDate(b.purchase_date)) return { error: "Purchase date is required." };
+  return {
+    name, cost: Math.round(cost * 100) / 100, purchase_date: b.purchase_date,
+    category: String(b.category || "").trim().slice(0, 60),
+    notes: String(b.notes || "").trim().slice(0, 500),
+  };
+}
+const getAsset = async (id, uid) => (await q(`SELECT ${ASSET_COLS} FROM ft_assets WHERE id = $1 AND user_id = $2`, [Number(id), uid]))[0];
+
+app.get("/api/assets", auth, wrap(async (req, res) => {
+  res.json(await q(`SELECT ${ASSET_COLS} FROM ft_assets WHERE user_id = $1 ORDER BY purchase_date DESC, id DESC`, [req.session.uid]));
+}));
+
+app.post("/api/assets", auth, wrap(async (req, res) => {
+  const a = cleanAsset(req.body || {});
+  if (a.error) return res.status(400).json(a);
+  const rows = await q(
+    `INSERT INTO ft_assets (user_id, name, category, cost, purchase_date, notes) VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${ASSET_COLS}`,
+    [req.session.uid, a.name, a.category, a.cost, a.purchase_date, a.notes]
+  );
+  res.json(rows[0]);
+}));
+
+app.put("/api/assets/:id", auth, wrap(async (req, res) => {
+  const a = cleanAsset(req.body || {});
+  if (a.error) return res.status(400).json(a);
+  const rows = await q(
+    `UPDATE ft_assets SET name=$1, category=$2, cost=$3, purchase_date=$4, notes=$5 WHERE id=$6 AND user_id=$7 RETURNING ${ASSET_COLS}`,
+    [a.name, a.category, a.cost, a.purchase_date, a.notes, Number(req.params.id), req.session.uid]
+  );
+  if (!rows[0]) return res.status(404).json({ error: "Asset not found." });
+  res.json(rows[0]);
+}));
+
+app.post("/api/assets/:id/sell", auth, wrap(async (req, res) => {
+  const uid = req.session.uid;
+  const asset = await getAsset(req.params.id, uid);
+  if (!asset) return res.status(404).json({ error: "Asset not found." });
+  if (asset.status !== "active") return res.status(400).json({ error: "This item is already sold or written off." });
+  const price = Number(req.body.price);
+  if (!Number.isFinite(price) || price <= 0) return res.status(400).json({ error: "Sale price must be greater than 0." });
+  if (!isDate(req.body.date)) return res.status(400).json({ error: "Sale date is required." });
+  const amount = Math.round(price * 100) / 100;
+  await q(`INSERT INTO ft_categories (user_id, type, name, color) VALUES ($1,'income',$2,'#1ABC9C') ON CONFLICT (user_id, type, name) DO NOTHING`, [uid, SALE_CATEGORY]);
+  const tx = (await q(
+    "INSERT INTO ft_transactions (user_id, type, category, amount, date, description) VALUES ($1,'income',$2,$3,$4,$5) RETURNING id, type, category, amount, date, description",
+    [uid, SALE_CATEGORY, amount, req.body.date, `Sold: ${asset.name}`]
+  ))[0];
+  const rows = await q(
+    `UPDATE ft_assets SET status='sold', sale_price=$1, end_date=$2, income_tx_id=$3 WHERE id=$4 RETURNING ${ASSET_COLS}`,
+    [amount, req.body.date, tx.id, asset.id]
+  );
+  res.json({ asset: rows[0], transaction: tx });
+}));
+
+app.post("/api/assets/:id/writeoff", auth, wrap(async (req, res) => {
+  const asset = await getAsset(req.params.id, req.session.uid);
+  if (!asset) return res.status(404).json({ error: "Asset not found." });
+  if (asset.status !== "active") return res.status(400).json({ error: "This item is already sold or written off." });
+  const date = isDate(req.body.date) ? req.body.date : new Date().toISOString().slice(0, 10);
+  const rows = await q(`UPDATE ft_assets SET status='written_off', end_date=$1 WHERE id=$2 RETURNING ${ASSET_COLS}`, [date, asset.id]);
+  res.json({ asset: rows[0] });
+}));
+
+// Undo a sale or write-off: the item goes back to "in use" and any sale income is removed
+app.post("/api/assets/:id/reactivate", auth, wrap(async (req, res) => {
+  const uid = req.session.uid;
+  const asset = await getAsset(req.params.id, uid);
+  if (!asset) return res.status(404).json({ error: "Asset not found." });
+  if (asset.income_tx_id) await q("DELETE FROM ft_transactions WHERE id = $1 AND user_id = $2", [asset.income_tx_id, uid]);
+  const rows = await q(`UPDATE ft_assets SET status='active', sale_price=NULL, end_date=NULL, income_tx_id=NULL WHERE id=$1 RETURNING ${ASSET_COLS}`, [asset.id]);
+  res.json({ asset: rows[0], removedTransactionId: asset.income_tx_id || null });
+}));
+
+app.delete("/api/assets/:id", auth, wrap(async (req, res) => {
+  const uid = req.session.uid;
+  const asset = await getAsset(req.params.id, uid);
+  if (!asset) return res.status(404).json({ error: "Asset not found." });
+  if (asset.income_tx_id) await q("DELETE FROM ft_transactions WHERE id = $1 AND user_id = $2", [asset.income_tx_id, uid]);
+  await q("DELETE FROM ft_assets WHERE id = $1", [asset.id]);
+  res.json({ ok: true, removedTransactionId: asset.income_tx_id || null });
 }));
 
 // ----- Backup / restore -----
@@ -345,11 +463,12 @@ app.get("/api/backup", auth, wrap(async (req, res) => {
   const [user] = await q("SELECT settings FROM ft_users WHERE id = $1", [uid]);
   const categories = await q("SELECT type, name, color FROM ft_categories WHERE user_id = $1 ORDER BY id", [uid]);
   const transactions = await q("SELECT type, category, amount, date, description FROM ft_transactions WHERE user_id = $1 ORDER BY date, id", [uid]);
-  res.json({ app: "ServiceTracker", version: 2, exportedAt: new Date().toISOString(), settings: cleanSettings(user?.settings), categories, transactions });
+  const assets = await q("SELECT name, category, cost, purchase_date, notes, status, sale_price, end_date FROM ft_assets WHERE user_id = $1 ORDER BY id", [uid]);
+  res.json({ app: "ServiceTracker", version: 2, exportedAt: new Date().toISOString(), settings: cleanSettings(user?.settings), categories, transactions, assets });
 }));
 
 app.post("/api/restore", auth, async (req, res) => {
-  const { categories, transactions, settings } = req.body || {};
+  const { categories, transactions, settings, assets } = req.body || {};
   if (!Array.isArray(categories) || !Array.isArray(transactions)) {
     return res.status(400).json({ error: "This is not a valid backup file." });
   }
@@ -359,6 +478,18 @@ app.post("/api/restore", auth, async (req, res) => {
     await client.query("BEGIN");
     await client.query("DELETE FROM ft_transactions WHERE user_id = $1", [uid]);
     await client.query("DELETE FROM ft_categories WHERE user_id = $1", [uid]);
+    if (Array.isArray(assets)) {
+      await client.query("DELETE FROM ft_assets WHERE user_id = $1", [uid]);
+      for (const raw of assets) {
+        const a = cleanAsset(raw || {});
+        if (a.error) continue;
+        const status = ["active", "sold", "written_off"].includes(raw.status) ? raw.status : "active";
+        await client.query(
+          "INSERT INTO ft_assets (user_id, name, category, cost, purchase_date, notes, status, sale_price, end_date) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)",
+          [uid, a.name, a.category, a.cost, a.purchase_date, a.notes, status, status === "sold" ? Number(raw.sale_price) || 0 : null, status === "active" ? null : (isDate(raw.end_date) ? raw.end_date : null)]
+        );
+      }
+    }
     const seen = new Set();
     for (const c of categories) {
       const name = String(c.name || "").trim();
