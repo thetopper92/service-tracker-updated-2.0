@@ -552,6 +552,31 @@ app.post("/api/import", auth, async (req, res) => {
   }
 });
 
+// Imports/restores are saved in one database transaction, so their rows share the same created_at.
+// That lets an import be listed and undone without touching transactions added by hand.
+app.get("/api/imports", auth, wrap(async (req, res) => {
+  res.json(await q(`
+    SELECT created_at::text AS at, created_at AS at_time, COUNT(*)::int AS count,
+           COUNT(*) FILTER (WHERE type = 'income')::int AS income,
+           COUNT(*) FILTER (WHERE type = 'expense')::int AS expense,
+           COALESCE(SUM(amount) FILTER (WHERE type = 'income'), 0) AS income_total,
+           COALESCE(SUM(amount) FILTER (WHERE type = 'expense'), 0) AS expense_total,
+           MIN(date) AS first_date, MAX(date) AS last_date
+    FROM ft_transactions WHERE user_id = $1
+    GROUP BY created_at HAVING COUNT(*) > 1
+    ORDER BY created_at DESC LIMIT 20`, [req.session.uid]));
+}));
+
+app.delete("/api/imports", auth, wrap(async (req, res) => {
+  const at = String(req.query.at || "");
+  if (!at) return res.status(400).json({ error: "Missing import time." });
+  const uid = req.session.uid;
+  await q(`UPDATE ft_assets SET status='active', sale_price=NULL, end_date=NULL, income_tx_id=NULL
+           WHERE user_id = $1 AND income_tx_id IN (SELECT id FROM ft_transactions WHERE user_id = $1 AND created_at = $2::timestamptz)`, [uid, at]);
+  const rows = await q("DELETE FROM ft_transactions WHERE user_id = $1 AND created_at = $2::timestamptz RETURNING id", [uid, at]);
+  res.json({ ok: true, removed: rows.length });
+}));
+
 // ----- Fingerprint / Face ID (WebAuthn) for app lock -----
 // The server verifies the fingerprint signature and only then releases the key that decrypts this phone's local data.
 const rpFor = (req) => ({ rpID: req.hostname, origin: `${req.protocol}://${req.get("host")}` });
