@@ -531,6 +531,7 @@ app.post("/api/import", auth, async (req, res) => {
     const t = cleanTx(raw || {});
     if (t.error) skipped++; else clean.push(t);
   }
+  if (mode === "replace" && !(await passwordOk(req).catch(() => false))) return res.status(403).json(WRONG_PW);
   const uid = req.session.uid;
   const client = await getPool().connect();
   try {
@@ -567,9 +568,22 @@ app.get("/api/imports", auth, wrap(async (req, res) => {
     ORDER BY created_at DESC LIMIT 20`, [req.session.uid]));
 }));
 
-app.delete("/api/imports", auth, wrap(async (req, res) => {
-  const at = String(req.query.at || "");
+// Deleting or replacing data needs the account password, so it can't happen by accident.
+async function passwordOk(req) {
+  const rows = await q("SELECT pass_hash FROM ft_users WHERE id = $1", [req.session.uid]);
+  return !!rows[0] && verify(String((req.body && req.body.password) || ""), rows[0].pass_hash);
+}
+const WRONG_PW = { error: "Wrong password. Nothing was deleted." };
+
+app.post("/api/auth/check", auth, wrap(async (req, res) => {
+  if (!(await passwordOk(req))) return res.status(403).json({ error: "Wrong password." });
+  res.json({ ok: true });
+}));
+
+app.post("/api/imports/undo", auth, wrap(async (req, res) => {
+  const at = String((req.body && req.body.at) || "");
   if (!at) return res.status(400).json({ error: "Missing import time." });
+  if (!(await passwordOk(req))) return res.status(403).json(WRONG_PW);
   const uid = req.session.uid;
   await q(`UPDATE ft_assets SET status='active', sale_price=NULL, end_date=NULL, income_tx_id=NULL
            WHERE user_id = $1 AND income_tx_id IN (SELECT id FROM ft_transactions WHERE user_id = $1 AND created_at = $2::timestamptz)`, [uid, at]);
@@ -799,6 +813,7 @@ app.post("/api/restore", auth, async (req, res) => {
   if (!Array.isArray(categories) || !Array.isArray(transactions)) {
     return res.status(400).json({ error: "This is not a valid backup file." });
   }
+  if (!(await passwordOk(req).catch(() => false))) return res.status(403).json(WRONG_PW);
   const uid = req.session.uid;
   const client = await getPool().connect();
   try {
