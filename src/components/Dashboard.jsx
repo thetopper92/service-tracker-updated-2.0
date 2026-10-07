@@ -1,18 +1,38 @@
 import { useMemo, useState } from "react";
 import Icon from "./Icon";
-import { fmtC, fmtD } from "../formatters";
+import { fmtC, fmtD, todayISO } from "../formatters";
 
-const PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All time"]];
+const PERIODS = [["month", "This month"], ["year", "This year"], ["all", "All time"], ["custom", "Dates"]];
+const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+const daysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return iso(d); };
 
 export default function Dashboard({ user, transactions, categories, settings, onEdit, onDelete, onReceived, goHistory, oil, onOilDone, goOil }) {
   const [period, setPeriod] = useState("month");
   const now = new Date();
   const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
   const yy = String(now.getFullYear());
+  const [from, setFrom] = useState(`${ym}-01`);
+  const [to, setTo] = useState(todayISO());
+  // If From is after To, swap them so the range still works
+  const [lo, hi] = from && to && from > to ? [to, from] : [from, to];
 
   const list = useMemo(() => transactions.filter((t) =>
-    period === "all" ? true : period === "year" ? t.date.startsWith(yy) : t.date.startsWith(ym)
-  ), [transactions, period, ym, yy]);
+    period === "all" ? true
+      : period === "year" ? t.date.startsWith(yy)
+      : period === "custom" ? (!lo || t.date >= lo) && (!hi || t.date <= hi)
+      : t.date.startsWith(ym)
+  ), [transactions, period, ym, yy, lo, hi]);
+
+  const lastMonth = () => {
+    const a = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const b = new Date(now.getFullYear(), now.getMonth(), 0);
+    setFrom(iso(a)); setTo(iso(b));
+  };
+  const presets = [
+    ["Last 7 days", () => { setFrom(daysAgo(6)); setTo(todayISO()); }],
+    ["Last 30 days", () => { setFrom(daysAgo(29)); setTo(todayISO()); }],
+    ["Last month", lastMonth],
+  ];
 
   const inc = list.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0);
   const exp = list.filter((t) => t.type === "expense").reduce((s, t) => s + t.amount, 0);
@@ -40,10 +60,33 @@ export default function Dashboard({ user, transactions, categories, settings, on
         </div>
         <div className="seg small">
           {PERIODS.map(([k, l]) => (
-            <button key={k} className={period === k ? "on" : ""} onClick={() => setPeriod(k)}>{l}</button>
+            <button key={k} className={period === k ? "on" : ""} onClick={() => setPeriod(k)}>
+              {k === "custom" && <Icon name="calendar" size={14} />} {l}
+            </button>
           ))}
         </div>
       </div>
+
+      {period === "custom" && (
+        <div className="panel date-range">
+          <div className="date-range-row">
+            <label className="field">
+              <span className="field-label">From</span>
+              <input className="input" type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} aria-label="From date" />
+            </label>
+            <label className="field">
+              <span className="field-label">To</span>
+              <input className="input" type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} aria-label="To date" />
+            </label>
+          </div>
+          <div className="chip-row">
+            {presets.map(([l, f]) => <button key={l} type="button" className="chip" onClick={f}>{l}</button>)}
+          </div>
+          <p className="muted small">
+            {lo && hi ? `${fmtD(lo, settings)} – ${fmtD(hi, settings)}` : lo ? `From ${fmtD(lo, settings)}` : hi ? `Up to ${fmtD(hi, settings)}` : "All dates"} · {list.length} transaction{list.length === 1 ? "" : "s"}
+          </p>
+        </div>
+      )}
 
       {oil?.has && oil.due && (
         <div className="due-banner">

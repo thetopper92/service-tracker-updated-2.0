@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import Icon from "./Icon";
 import { api } from "../api";
 import { fmtC, fmtD } from "../formatters";
+import { askPassword } from "./PasswordPrompt";
 
 // Lists past imports/restores (rows saved together) so a wrong import can be undone
 export default function ImportHistory({ settings, reload, refreshKey }) {
@@ -14,13 +15,16 @@ export default function ImportHistory({ settings, reload, refreshKey }) {
   useEffect(() => { load(); }, [refreshKey]);
 
   const undo = async (b) => {
-    if (!confirm(`Undo this import? ${b.count} transactions (${b.income} income, ${b.expense} expenses) will be removed. Transactions you added yourself are not affected.`)) return;
-    try {
-      const r = await api.del(`/api/imports?at=${encodeURIComponent(b.at)}`);
-      await reload();
-      await load();
-      alert(`Removed ${r.removed} imported transactions.`);
-    } catch (e) { alert(e.message); }
+    const r = await askPassword({
+      title: "Undo this import?",
+      message: `${b.count} transactions (${b.income} income, ${b.expense} expenses) will be deleted. Transactions you added yourself are not affected. Enter your password to confirm.`,
+      confirmLabel: "Delete these rows",
+      run: (password) => api.post("/api/imports/undo", { at: b.at, password }),
+    });
+    if (!r) return;
+    await reload();
+    await load();
+    alert(`Removed ${r.removed} imported transactions.`);
   };
 
   return (

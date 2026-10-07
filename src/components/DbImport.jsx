@@ -3,6 +3,7 @@ import Modal from "./Modal";
 import Inp from "./Inp";
 import { api } from "../api";
 import { fmtC, fmtD } from "../formatters";
+import { askPassword } from "./PasswordPrompt";
 import {
   openDb, listTables, detectFormat, readOwnBackup, readTrackPro, convertSource, guessColumns,
   guessSeparateTables, distinctValues, autoValueMap, isValidTx,
@@ -94,21 +95,30 @@ export default function DbImport({ file, settings, onClose, onDone }) {
   const run = async () => {
     if (undecided) { setError(`Choose Income or Expense for every value in the list (${undecided} rows not decided yet).`); return; }
     if (oneSided && !confirm(`Only ${inc.length ? "income" : "expenses"} found — nothing will be imported as ${inc.length ? "expenses" : "income"}. Import anyway?`)) return;
-    if (importMode === "replace" && !confirm(own
-      ? "Replace ALL your data (transactions, categories, equipment, oil changes, settings) with this backup?"
-      : "Delete all your current transactions and replace them with this file?")) return;
+    let password;
+    if (importMode === "replace") {
+      const ok = await askPassword({
+        title: own ? "Replace everything?" : "Replace transactions?",
+        message: own
+          ? "This deletes ALL your data (transactions, categories, equipment, oil changes, settings) and replaces it with this backup. Enter your password to confirm."
+          : "This deletes all your current transactions and replaces them with this file. Enter your password to confirm.",
+        confirmLabel: "Delete and replace",
+        run: async (pw) => { await api.post("/api/auth/check", { password: pw }); password = pw; return true; },
+      });
+      if (!ok) return;
+    }
     setBusy(true); setError("");
     try {
       if (own && importMode === "replace") {
         setProgress("Restoring backup…");
-        const r = await api.post("/api/restore", own);
+        const r = await api.post("/api/restore", { ...own, password });
         await onDone(`Restored ${r.transactions} transactions from the .db backup.`);
         return;
       }
       let done = 0;
       for (let i = 0; i < valid.length; i += CHUNK) {
         setProgress(`Importing ${Math.min(i + CHUNK, valid.length)} of ${valid.length}…`);
-        const r = await api.post("/api/import", { mode: i === 0 ? importMode : "add", transactions: valid.slice(i, i + CHUNK) });
+        const r = await api.post("/api/import", { mode: i === 0 ? importMode : "add", password: i === 0 ? password : undefined, transactions: valid.slice(i, i + CHUNK) });
         done += r.imported;
       }
       await onDone(`Imported ${done} transactions: ${inc.length} income and ${exp.length} expenses${skipped ? ` (${skipped} rows skipped)` : ""}.`);

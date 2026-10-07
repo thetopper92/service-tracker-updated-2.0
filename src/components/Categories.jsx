@@ -6,6 +6,7 @@ import { api } from "../api";
 import { COLORS, CURRENCIES, DATE_FORMATS, TABS, BACKUP_PREFIX } from "../data";
 import { fmtC, todayISO } from "../formatters";
 import { exportCSV } from "../exportCSV";
+import { askPassword } from "./PasswordPrompt";
 import Assets from "./Assets";
 import Investment from "./Investment";
 import InstallApp from "./InstallApp";
@@ -78,10 +79,16 @@ export default function Categories({ user, categories, transactions, assets, oil
   };
 
   const restoreData = async (data) => {
-    if (!confirm("Restoring replaces ALL your current data with this backup. Continue?")) return;
-    const r = await api.post("/api/restore", data);
+    const r = await askPassword({
+      title: "Restore this backup?",
+      message: "Restoring deletes ALL your current data and replaces it with this backup. Enter your password to confirm.",
+      confirmLabel: "Delete and restore",
+      run: (password) => api.post("/api/restore", { ...data, password }),
+    });
+    if (!r) return;
+    await reload(true);
+    setImportTick((n) => n + 1);
     alert(`Restored ${r.transactions} transactions.`);
-    reload(true);
   };
 
   // One button for every backup type: .json, password-protected .stbak, and .db / .sqlite databases.
