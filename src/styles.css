@@ -377,3 +377,17 @@ textarea.input { resize: vertical; }
 .lock-row .grow { display: flex; flex-direction: column; }
 .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .bad-row td { color: var(--red); opacity: .7; }
+
+/* ---------- Import ---------- */
+.import-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.source-box { border: 1px solid var(--border); border-radius: 14px; padding: 12px; display: flex; flex-direction: column; gap: 12px; }
+.source-box.income { border-color: rgba(34, 180, 108, .5); }
+.source-box.expense { border-color: rgba(224, 92, 92, .5); }
+.source-title { font-weight: 700; }
+.source-box.income .source-title { color: var(--green); }
+.source-box.expense .source-title { color: var(--red); }
+.value-map { display: flex; flex-direction: column; gap: 6px; }
+.value-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 8px 10px; border-radius: 12px; background: var(--soft); }
+.value-row.undecided { outline: 2px dashed var(--amber); }
+.value-row .grow { min-width: 120px; }
+.import-history { margin-top: 16px; }

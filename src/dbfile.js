@@ -87,23 +87,118 @@ export function parseAmount(v) {
   return neg ? -n : n;
 }
 
-export function parseType(v, amount) {
-  const s = String(v ?? "").trim().toLowerCase();
-  if (/^(income|in|credit|cr|earning|earnings|revenue|sale|sales|deposit|received|\+|1|true)$/.test(s) || s.startsWith("inc")) return "income";
-  if (/^(expense|expenses|out|debit|dr|spend|spending|cost|withdrawal|payment|-|0|false)$/.test(s) || s.startsWith("exp")) return "expense";
-  return amount < 0 ? "expense" : "income";
+// Words people use for money in / money out (English + common cash-book app wording)
+const IN_RE = /^(\+|i|in|cr)$|income|incom|credit|cash ?in|money ?in|receiv|receipt|got|earn|revenue|sale|deposit|collect|refund|you got|jama/i;
+const OUT_RE = /^(-|o|e|out|dr|exp)$|expense|expence|debit|cash ?out|money ?out|paid|pay|spent|spend|cost|withdraw|purchase|bought|gave|you gave|bill|udhaar|kharch/i;
+
+export function guessTypeValue(v) {
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const isIn = IN_RE.test(s), isOut = OUT_RE.test(s);
+  if (isIn && !isOut) return "income";
+  if (isOut && !isIn) return "expense";
+  return null;
 }
 
-// guess which column holds what, from its name
-export function guessColumns(cols) {
-  const find = (re) => cols.find((c) => re.test(c)) || "";
-  return {
-    date: find(/date|time|day|created|when/i),
-    amount: find(/amount|amt|value|total|price|sum|money/i),
-    type: find(/^type$|kind|direction|in_out|income_expense|is_income|category_type/i),
-    category: find(/category_name|category|cat|group|account|head/i),
-    description: find(/note|desc|memo|detail|comment|remark|title|name/i),
+export function parseType(v, amount) {
+  return guessTypeValue(v) || (amount < 0 ? "expense" : "income");
+}
+
+export function distinctValues(db, table, col, limit = 60) {
+  if (!table || !col) return [];
+  return rows(db, `SELECT ${qi(col)} AS v, COUNT(*) AS n FROM ${qi(table)} GROUP BY ${qi(col)} ORDER BY n DESC LIMIT ${limit}`)
+    .map((r) => ({ value: r.v === null ? "" : String(r.v), count: r.n }));
+}
+
+const nameIs = (re) => (c) => re.test(c);
+const IN_COL = /(^|[^a-z])(cash_?in|money_?in|credit|cr_?amount|received|receipt|income|deposit|in_?amount|amount_?in|you_?got)([^a-z]|$)/i;
+const OUT_COL = /(^|[^a-z])(cash_?out|money_?out|debit|dr_?amount|paid|payment|expense|withdraw|spent|out_?amount|amount_?out|you_?gave)([^a-z]|$)/i;
+
+// guess which column holds what, from names and (for the type column) the values themselves
+export function guessColumns(cols, db, table) {
+  const find = (re, not) => cols.find((c) => re.test(c) && !(not && not.test(c))) || "";
+  const g = {
+    date: find(/date|time|day|created|when|^dt$|_dt$|^dt_|timestamp/i),
+    amount: find(/amount|amt|value|total|price|sum|money/i, /type|kind/i),
+    category: [/category_name/i, /category/i, /^cat$|_cat$|^cat_/i, /group|head|account/i, /party|customer|book/i]
+      .map((re) => find(re, /type|kind|_id$/i)).find(Boolean) || "",
+    description: [/note|desc|memo|remark|narration|particular/i, /detail|comment|title/i].map((re) => find(re)).find(Boolean) || "",
+    typeCol: "",
+    inCol: "", outCol: "",
+    mode: "column",
+    valueMap: {},
   };
+  // two amount columns: money in / money out
+  const inCol = cols.find(nameIs(IN_COL)), outCol = cols.find(nameIs(OUT_COL));
+  if (inCol && outCol && inCol !== outCol) { g.mode = "twocols"; g.inCol = inCol; g.outCol = outCol; return g; }
+  // a column whose values look like in/out words
+  if (db && table) {
+    let best = null;
+    for (const c of cols) {
+      if (c === g.date || c === g.amount) continue;
+      const vals = distinctValues(db, table, c, 12);
+      if (vals.length < 1 || vals.length > 10) continue;
+      const known = vals.filter((v) => guessTypeValue(v.value)).reduce((s, v) => s + v.count, 0);
+      const total = vals.reduce((s, v) => s + v.count, 0);
+      const kinds = new Set(vals.map((v) => guessTypeValue(v.value)).filter(Boolean));
+      const score = (known / (total || 1)) + (kinds.size === 2 ? 1 : 0) + (/type|kind|direction|entry|mode|flow/i.test(c) ? 0.5 : 0);
+      if (known && (!best || score > best.score)) best = { c, score };
+    }
+    if (best) g.typeCol = best.c;
+  }
+  if (!g.typeCol) g.typeCol = find(/type|kind|direction|entry|flow|in_?out|dr_?cr/i);
+  if (!g.typeCol && db && table && g.amount) {
+    const neg = rows(db, `SELECT COUNT(*) AS n FROM ${qi(table)} WHERE CAST(${qi(g.amount)} AS REAL) < 0`)[0]?.n;
+    if (neg) g.mode = "sign";
+  }
+  if (g.typeCol && db && table) g.valueMap = autoValueMap(distinctValues(db, table, g.typeCol));
+  return g;
+}
+
+export function autoValueMap(vals) {
+  const m = {};
+  vals.forEach((v) => { m[v.value] = guessTypeValue(v.value) || ""; }); // "" = not decided yet
+  return m;
+}
+
+// Tables that look like separate income / expense lists
+export function guessSeparateTables(tables) {
+  const inc = tables.find((t) => /income|earning|sale|receipt|cash_?in|credit/i.test(t.name) && t.count);
+  const exp = tables.find((t) => /expense|expence|spend|cost|purchase|payment|cash_?out|debit/i.test(t.name) && t.count);
+  return inc && exp && inc !== exp ? { inc, exp } : null;
+}
+
+// Convert one table to transactions with the chosen settings
+export function convertSource(db, src, dayFirst) {
+  if (!src?.table || !src.date) return [];
+  const list = readTable(db, src.table);
+  const out = [];
+  const base = (r) => ({
+    date: parseDate(r[src.date], dayFirst),
+    category: (src.category ? String(r[src.category] ?? "").trim() : "") || "Imported",
+    description: src.description ? String(r[src.description] ?? "").trim().slice(0, 500) : "",
+  });
+  for (const r of list) {
+    if (src.mode === "twocols") {
+      const i = Math.abs(parseAmount(r[src.inCol])), o = Math.abs(parseAmount(r[src.outCol]));
+      if (i > 0) out.push({ ...base(r), type: "income", amount: i });
+      if (o > 0) out.push({ ...base(r), type: "expense", amount: o });
+      if (!(i > 0) && !(o > 0)) out.push({ ...base(r), type: "income", amount: NaN }); // counted as skipped
+      continue;
+    }
+    const raw = parseAmount(r[src.amount]);
+    let type;
+    if (src.mode === "income" || src.mode === "expense") type = src.mode;
+    else if (src.mode === "sign") type = raw < 0 ? "expense" : "income";
+    else {
+      const v = r[src.typeCol] === null || r[src.typeCol] === undefined ? "" : String(r[src.typeCol]);
+      type = src.valueMap?.[v] ?? guessTypeValue(v) ?? "";
+      if (type === "skip") continue;
+      if (!type) type = "unknown";
+    }
+    out.push({ ...base(r), type, amount: Math.abs(raw) });
+  }
+  return out;
 }
 
 // ---------- known formats ----------
@@ -143,25 +238,6 @@ export function readTrackPro(db) {
     date: parseDate(t.date),
     description: [t.notes, t.tags].filter(Boolean).join(" · "),
   }));
-}
-
-// Any other database: user picks the table and which column is what
-export function mapRows(list, map, dayFirst) {
-  return list.map((r) => {
-    const raw = parseAmount(r[map.amount]);
-    let type;
-    if (map.typeMode === "income" || map.typeMode === "expense") type = map.typeMode;
-    else if (map.typeMode === "sign") type = raw < 0 ? "expense" : "income";
-    else type = parseType(r[map.type], raw);
-    const category = map.category ? String(r[map.category] ?? "").trim() : "";
-    return {
-      type,
-      amount: Math.abs(raw),
-      category: category || "Imported",
-      date: parseDate(r[map.date], dayFirst),
-      description: map.description ? String(r[map.description] ?? "").trim().slice(0, 500) : "",
-    };
-  });
 }
 
 export const isValidTx = (t) => t.date && Number.isFinite(t.amount) && t.amount > 0 && (t.type === "income" || t.type === "expense");
