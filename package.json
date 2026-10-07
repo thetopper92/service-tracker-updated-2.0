@@ -10,12 +10,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.3",
     "cookie-session": "^2.1.0",
     "express": "^4.21.2",
     "pg": "^8.13.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "recharts": "^2.10.0",
+    "sql.js": "^1.14.2",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
