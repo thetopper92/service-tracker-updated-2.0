@@ -4,6 +4,7 @@ import express from "express";
 import cookieSession from "cookie-session";
 import crypto from "crypto";
 import pg from "pg";
+import webpush from "web-push";
 
 const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL || "";
 const isProd = process.env.NODE_ENV === "production" || !!process.env.VERCEL;
@@ -20,6 +21,7 @@ const DEFAULT_SETTINGS = {
   currency: "$", currencyPos: "before", dateFormat: "YYYY-MM-DD",
   language: "en", decimalSep: ".", thousandSep: ",", showCents: true, defaultTab: "dashboard", theme: "light",
   investAmount: 0, investDate: "", investIncludeEquip: true,
+  oilInterval: 90,
 };
 const BOOL_SETTINGS = ["showCents", "investIncludeEquip"];
 const NUM_SETTINGS = ["investAmount"];
@@ -74,6 +76,25 @@ function ensureSchema() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT now()
         );
         CREATE INDEX IF NOT EXISTS ft_tx_user_date ON ft_transactions (user_id, date);
+        ALTER TABLE ft_transactions ADD COLUMN IF NOT EXISTS unpaid BOOLEAN NOT NULL DEFAULT false;
+        ALTER TABLE ft_users ADD COLUMN IF NOT EXISTS oil_notified TEXT;
+        CREATE TABLE IF NOT EXISTS ft_oil_changes (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES ft_users(id) ON DELETE CASCADE,
+          date TEXT NOT NULL,
+          odometer TEXT,
+          notes TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS ft_push (
+          id SERIAL PRIMARY KEY,
+          user_id INTEGER NOT NULL REFERENCES ft_users(id) ON DELETE CASCADE,
+          endpoint TEXT UNIQUE NOT NULL,
+          sub JSONB NOT NULL,
+          tz TEXT,
+          created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+        );
+        CREATE TABLE IF NOT EXISTS ft_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS ft_assets (
           id SERIAL PRIMARY KEY,
           user_id INTEGER NOT NULL REFERENCES ft_users(id) ON DELETE CASCADE,
@@ -127,6 +148,7 @@ function cleanTx(b) {
     category: String(b.category).trim().slice(0, 100),
     date: b.date,
     description: String(b.description || "").trim().slice(0, 500),
+    unpaid: b.type === "income" && (b.unpaid === true || b.unpaid === "true"),
   };
 }
 function cleanSettings(s = {}) {
@@ -137,6 +159,9 @@ function cleanSettings(s = {}) {
     else if (NUM_SETTINGS.includes(k)) {
       const n = Number(s[k]);
       out[k] = Number.isFinite(n) && n > 0 ? Math.round(n * 100) / 100 : 0;
+    } else if (k === "oilInterval") {
+      const n = Math.round(Number(s[k]));
+      out[k] = Number.isFinite(n) && n >= 1 && n <= 3650 ? n : DEFAULT_SETTINGS.oilInterval;
     } else if (k === "investDate") out[k] = isDate(s[k]) ? s[k] : "";
     else out[k] = String(s[k]).slice(0, 20);
   }
@@ -330,7 +355,7 @@ app.delete("/api/categories/:id", auth, wrap(async (req, res) => {
 
 // ----- Transactions -----
 app.get("/api/transactions", auth, wrap(async (req, res) => {
-  res.json(await q("SELECT id, type, category, amount, date, description FROM ft_transactions WHERE user_id = $1 ORDER BY date DESC, id DESC",
+  res.json(await q("SELECT id, type, category, amount, date, description, unpaid FROM ft_transactions WHERE user_id = $1 ORDER BY date DESC, id DESC",
     [req.session.uid]));
 }));
 
@@ -338,8 +363,8 @@ app.post("/api/transactions", auth, wrap(async (req, res) => {
   const t = cleanTx(req.body || {});
   if (t.error) return res.status(400).json(t);
   const rows = await q(
-    "INSERT INTO ft_transactions (user_id, type, category, amount, date, description) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, type, category, amount, date, description",
-    [req.session.uid, t.type, t.category, t.amount, t.date, t.description]
+    "INSERT INTO ft_transactions (user_id, type, category, amount, date, description, unpaid) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, type, category, amount, date, description, unpaid",
+    [req.session.uid, t.type, t.category, t.amount, t.date, t.description, t.unpaid]
   );
   res.json(rows[0]);
 }));
@@ -348,8 +373,8 @@ app.put("/api/transactions/:id", auth, wrap(async (req, res) => {
   const t = cleanTx(req.body || {});
   if (t.error) return res.status(400).json(t);
   const rows = await q(
-    "UPDATE ft_transactions SET type=$1, category=$2, amount=$3, date=$4, description=$5 WHERE id=$6 AND user_id=$7 RETURNING id, type, category, amount, date, description",
-    [t.type, t.category, t.amount, t.date, t.description, Number(req.params.id), req.session.uid]
+    "UPDATE ft_transactions SET type=$1, category=$2, amount=$3, date=$4, description=$5, unpaid=$6 WHERE id=$7 AND user_id=$8 RETURNING id, type, category, amount, date, description, unpaid",
+    [t.type, t.category, t.amount, t.date, t.description, t.unpaid, Number(req.params.id), req.session.uid]
   );
   if (!rows[0]) return res.status(404).json({ error: "Transaction not found." });
   await q("UPDATE ft_assets SET sale_price = $1, end_date = $2 WHERE income_tx_id = $3 AND user_id = $4",
@@ -419,7 +444,7 @@ app.post("/api/assets/:id/sell", auth, wrap(async (req, res) => {
   const amount = Math.round(price * 100) / 100;
   await q(`INSERT INTO ft_categories (user_id, type, name, color) VALUES ($1,'income',$2,'#1ABC9C') ON CONFLICT (user_id, type, name) DO NOTHING`, [uid, SALE_CATEGORY]);
   const tx = (await q(
-    "INSERT INTO ft_transactions (user_id, type, category, amount, date, description) VALUES ($1,'income',$2,$3,$4,$5) RETURNING id, type, category, amount, date, description",
+    "INSERT INTO ft_transactions (user_id, type, category, amount, date, description) VALUES ($1,'income',$2,$3,$4,$5) RETURNING id, type, category, amount, date, description, unpaid",
     [uid, SALE_CATEGORY, amount, req.body.date, `Sold: ${asset.name}`]
   ))[0];
   const rows = await q(
@@ -457,18 +482,141 @@ app.delete("/api/assets/:id", auth, wrap(async (req, res) => {
   res.json({ ok: true, removedTransactionId: asset.income_tx_id || null });
 }));
 
+// ----- Oil changes -----
+function cleanOil(b) {
+  if (!isDate(b.date)) return { error: "Date is required." };
+  return { date: b.date, odometer: String(b.odometer || "").trim().slice(0, 30), notes: String(b.notes || "").trim().slice(0, 300) };
+}
+const OIL_COLS = "id, date, odometer, notes";
+
+app.get("/api/oil", auth, wrap(async (req, res) => {
+  res.json(await q(`SELECT ${OIL_COLS} FROM ft_oil_changes WHERE user_id = $1 ORDER BY date DESC, id DESC`, [req.session.uid]));
+}));
+app.post("/api/oil", auth, wrap(async (req, res) => {
+  const c = cleanOil(req.body || {});
+  if (c.error) return res.status(400).json(c);
+  const rows = await q(`INSERT INTO ft_oil_changes (user_id, date, odometer, notes) VALUES ($1,$2,$3,$4) RETURNING ${OIL_COLS}`,
+    [req.session.uid, c.date, c.odometer, c.notes]);
+  await q("UPDATE ft_users SET oil_notified = NULL WHERE id = $1", [req.session.uid]); // new cycle: allow a fresh reminder
+  res.json(rows[0]);
+}));
+app.put("/api/oil/:id", auth, wrap(async (req, res) => {
+  const c = cleanOil(req.body || {});
+  if (c.error) return res.status(400).json(c);
+  const rows = await q(`UPDATE ft_oil_changes SET date=$1, odometer=$2, notes=$3 WHERE id=$4 AND user_id=$5 RETURNING ${OIL_COLS}`,
+    [c.date, c.odometer, c.notes, Number(req.params.id), req.session.uid]);
+  if (!rows[0]) return res.status(404).json({ error: "Record not found." });
+  res.json(rows[0]);
+}));
+app.delete("/api/oil/:id", auth, wrap(async (req, res) => {
+  await q("DELETE FROM ft_oil_changes WHERE id = $1 AND user_id = $2", [Number(req.params.id), req.session.uid]);
+  res.json({ ok: true });
+}));
+
+// ----- Push notifications (oil change reminders) -----
+// VAPID keys are created once and kept in the database, so no secret setup is needed.
+let vapid = null;
+async function getVapid(subject) {
+  if (!vapid) {
+    const rows = await q("SELECT value FROM ft_meta WHERE key = 'vapid'");
+    if (rows[0]) vapid = JSON.parse(rows[0].value);
+    else {
+      const keys = webpush.generateVAPIDKeys();
+      await q("INSERT INTO ft_meta (key, value) VALUES ('vapid', $1) ON CONFLICT (key) DO NOTHING", [JSON.stringify(keys)]);
+      vapid = JSON.parse((await q("SELECT value FROM ft_meta WHERE key = 'vapid'"))[0].value);
+    }
+  }
+  webpush.setVapidDetails(subject, vapid.publicKey, vapid.privateKey);
+  return vapid;
+}
+const pushSubject = (req) => {
+  const host = req.get("host") || "";
+  return /^(localhost|127\.)/.test(host) || !host ? "https://service-tracker-2.vercel.app" : `https://${host}`;
+};
+
+async function sendToUser(uid, payload) {
+  const subs = await q("SELECT id, sub FROM ft_push WHERE user_id = $1", [uid]);
+  let sent = 0;
+  for (const s of subs) {
+    try {
+      await webpush.sendNotification(s.sub, JSON.stringify(payload), { TTL: 60 * 60 * 24 });
+      sent++;
+    } catch (e) {
+      if (e.statusCode === 404 || e.statusCode === 410) await q("DELETE FROM ft_push WHERE id = $1", [s.id]); // phone unsubscribed
+      else console.error("Push error:", e.statusCode || "", e.body || e.message);
+    }
+  }
+  return sent;
+}
+
+app.get("/api/push/key", auth, wrap(async (req, res) => {
+  const v = await getVapid(pushSubject(req));
+  res.json({ publicKey: v.publicKey });
+}));
+app.post("/api/push/subscribe", auth, wrap(async (req, res) => {
+  const sub = req.body?.subscription;
+  if (!sub?.endpoint || !sub?.keys) return res.status(400).json({ error: "Invalid subscription." });
+  const tz = String(req.body.tz || "").slice(0, 60);
+  await q(`INSERT INTO ft_push (user_id, endpoint, sub, tz) VALUES ($1,$2,$3,$4)
+           ON CONFLICT (endpoint) DO UPDATE SET user_id = EXCLUDED.user_id, sub = EXCLUDED.sub, tz = EXCLUDED.tz`,
+    [req.session.uid, sub.endpoint, JSON.stringify(sub), tz]);
+  res.json({ ok: true });
+}));
+app.post("/api/push/unsubscribe", auth, wrap(async (req, res) => {
+  await q("DELETE FROM ft_push WHERE endpoint = $1 AND user_id = $2", [String(req.body?.endpoint || ""), req.session.uid]);
+  res.json({ ok: true });
+}));
+app.post("/api/push/test", auth, wrap(async (req, res) => {
+  await getVapid(pushSubject(req));
+  const sent = await sendToUser(req.session.uid, { title: "Service Tracker", body: "Reminders are working.", tag: "test" });
+  if (!sent) return res.status(400).json({ error: "No phone is set up for reminders yet." });
+  res.json({ sent });
+}));
+
+const localDate = (tz) => {
+  try { return new Intl.DateTimeFormat("en-CA", { timeZone: tz || "UTC" }).format(new Date()); } catch { return new Date().toISOString().slice(0, 10); }
+};
+const daysBetween = (a, b) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
+
+// Runs once a day (vercel.json "crons"): sends oil change reminders that are due.
+app.get("/api/cron/reminders", wrap(async (req, res) => {
+  if (process.env.CRON_SECRET && req.get("authorization") !== `Bearer ${process.env.CRON_SECRET}`) return res.status(401).json({ error: "Unauthorized" });
+  await getVapid(pushSubject(req));
+  const users = await q(`
+    SELECT u.id, u.settings, u.oil_notified, MAX(o.date) AS last_change, MIN(p.tz) AS tz
+    FROM ft_users u JOIN ft_oil_changes o ON o.user_id = u.id JOIN ft_push p ON p.user_id = u.id
+    GROUP BY u.id`);
+  let notified = 0;
+  for (const u of users) {
+    const interval = cleanSettings(u.settings).oilInterval;
+    const today = localDate(u.tz);
+    const since = daysBetween(u.last_change, today);
+    if (since < interval) continue;
+    // remind on the due day, then every 3 days until a new oil change is logged
+    if (u.oil_notified && u.oil_notified >= u.last_change && daysBetween(u.oil_notified, today) < 3) continue;
+    const over = since - interval;
+    const body = over === 0
+      ? `It's been ${since} days since your last oil change. Time for a new one.`
+      : `Oil change overdue by ${over} day${over === 1 ? "" : "s"} (${since} days since last change).`;
+    const sent = await sendToUser(u.id, { title: "Oil change due", body, tag: "oil", url: "/?section=oil" });
+    if (sent) { await q("UPDATE ft_users SET oil_notified = $1 WHERE id = $2", [today, u.id]); notified++; }
+  }
+  res.json({ ok: true, checked: users.length, notified });
+}));
+
 // ----- Backup / restore -----
 app.get("/api/backup", auth, wrap(async (req, res) => {
   const uid = req.session.uid;
   const [user] = await q("SELECT settings FROM ft_users WHERE id = $1", [uid]);
   const categories = await q("SELECT type, name, color FROM ft_categories WHERE user_id = $1 ORDER BY id", [uid]);
-  const transactions = await q("SELECT type, category, amount, date, description FROM ft_transactions WHERE user_id = $1 ORDER BY date, id", [uid]);
+  const transactions = await q("SELECT type, category, amount, date, description, unpaid FROM ft_transactions WHERE user_id = $1 ORDER BY date, id", [uid]);
+  const oilChanges = await q("SELECT date, odometer, notes FROM ft_oil_changes WHERE user_id = $1 ORDER BY date, id", [uid]);
   const assets = await q("SELECT name, category, cost, purchase_date, notes, status, sale_price, end_date FROM ft_assets WHERE user_id = $1 ORDER BY id", [uid]);
-  res.json({ app: "ServiceTracker", version: 2, exportedAt: new Date().toISOString(), settings: cleanSettings(user?.settings), categories, transactions, assets });
+  res.json({ app: "ServiceTracker", version: 2, exportedAt: new Date().toISOString(), settings: cleanSettings(user?.settings), categories, transactions, assets, oilChanges });
 }));
 
 app.post("/api/restore", auth, async (req, res) => {
-  const { categories, transactions, settings, assets } = req.body || {};
+  const { categories, transactions, settings, assets, oilChanges } = req.body || {};
   if (!Array.isArray(categories) || !Array.isArray(transactions)) {
     return res.status(400).json({ error: "This is not a valid backup file." });
   }
@@ -505,9 +653,16 @@ app.post("/api/restore", auth, async (req, res) => {
         seen.add(t.type + t.category);
         await client.query("INSERT INTO ft_categories (user_id, type, name, color) VALUES ($1,$2,$3,$4)", [uid, t.type, t.category, COLORS[seen.size % COLORS.length]]);
       }
-      await client.query("INSERT INTO ft_transactions (user_id, type, category, amount, date, description) VALUES ($1,$2,$3,$4,$5,$6)",
-        [uid, t.type, t.category, t.amount, t.date, t.description]);
+      await client.query("INSERT INTO ft_transactions (user_id, type, category, amount, date, description, unpaid) VALUES ($1,$2,$3,$4,$5,$6,$7)",
+        [uid, t.type, t.category, t.amount, t.date, t.description, t.unpaid]);
       count++;
+    }
+    if (Array.isArray(oilChanges)) {
+      await client.query("DELETE FROM ft_oil_changes WHERE user_id = $1", [uid]);
+      for (const o of oilChanges) {
+        const c = cleanOil(o || {});
+        if (!c.error) await client.query("INSERT INTO ft_oil_changes (user_id, date, odometer, notes) VALUES ($1,$2,$3,$4)", [uid, c.date, c.odometer, c.notes]);
+      }
     }
     if (settings) await client.query("UPDATE ft_users SET settings = $1 WHERE id = $2", [JSON.stringify(cleanSettings(settings)), uid]);
     await client.query("COMMIT");
